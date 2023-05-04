@@ -105,6 +105,11 @@ class DeepBase {
             })
         });
     }
+
+    keys(...args) {
+        const r = this.get(...args)
+        return (r !== null && typeof r === 'object') ? Object.keys(r) : [];
+    }
 }
 
 

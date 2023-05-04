@@ -43,9 +43,12 @@ const userBalance = mem.get(...path, "balance");
 console.log(userBalance); // 580
 ```
 
-### 🔥 Overall
+### 🔥 Finally
 ```js
 mem.add("user", { name: "anya" });
+
+const userIds = mem.keys("user")
+console.log(userIds) // [ 'iKid4OCK', 'F3wORv_J' ]
 
 console.log(mem.get()) // db.json
 // {

@@ -23,6 +23,10 @@ const userBalance = mem.get(...path, "count");
 console.log(userBalance); // 2
 
 mem.add("user", { name: "anya" });
+
+const userIds = mem.keys("user")
+console.log(userIds) // [ 'iKid4OCK', 'F3wORv_J' ]
+
 console.log(mem.get()) // db.json
 // {
 //     "config": {
