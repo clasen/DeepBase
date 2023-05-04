@@ -26,7 +26,9 @@ console.log(configLang); // "en"
 ### ✅ Adding Rows
 ```js
 const path = mem.add("user", { name: "martin" });
-console.log(path) // [ 'user', 'wC1a53cD' ] / wC1a53cD is a random string
+
+// add() will create a secure key (ie. "wC1a53cD")
+console.log(path) // [ 'user', 'wC1a53cD' ]
 
 const userName = mem.get(...path, "name");
 console.log(userName); // "martin"
@@ -43,14 +45,14 @@ console.log(userBalance); // 580
 
 ### 🔥 Overall
 ```js
-mem.add("user", { name: "john" });
+mem.add("user", { name: "anya" });
 
 console.log(mem.get()) // db.json
 // {
 //     config: { lang: 'en' },
 //     user: {
 //         wC1a53cD: { name: 'martin', balance: 580 },
-//         ykxt9GJt: { name: 'john' }
+//         ykxt9GJt: { name: 'anya' }
 //     }
 // }
 ```
