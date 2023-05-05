@@ -1,6 +1,6 @@
 {
   "name": "deepbase",
-  "version": "1.0.2",
+  "version": "1.0.5",
   "description": "⚡ Fastest and simplest way to add persistence to your projects.",
   "main": "index.js",
   "dependencies": {
@@ -8,7 +8,7 @@
     "steno": "^0.4.4"
   },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "mocha"
   },
   "repository": {
     "type": "git",
