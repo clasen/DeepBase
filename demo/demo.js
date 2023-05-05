@@ -27,10 +27,21 @@ mem.add("user", { name: "anya" });
 const userIds = mem.keys("user")
 console.log(userIds) // [ 'iKid4OCK', 'F3wORv_J' ]
 
+// FILTERS
+mem.setFilter("*.lang", (args) => {
+    return args[0].toUpperCase()
+})
+mem.getFilter("*.lang", (args) => {
+    return args[0].toLowerCase()
+})
+
+mem.set("config", "lang", 'En');
+const r = mem.get("config", "lang"); // en
+
 console.log(mem.get()) // db.json
 // {
 //     "config": {
-//         "lang": "en"
+//         "lang": "EN"
 //     },
 //     "user": {
 //         "iKid4OCK": {
@@ -42,3 +53,4 @@ console.log(mem.get()) // db.json
 //         }
 //     }
 // }
+

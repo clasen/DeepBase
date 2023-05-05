@@ -116,4 +116,13 @@ describe('DeepBase', () => {
             assert.deepEqual(db.get('foo', 'bar'), 1);
         });
     });
+
+    describe('#keys()', () => {
+
+        it('should return keys', async () => {
+            db.set('foo', 'bar', 1);
+            db.set('foo', 'quux', 1);
+            assert.deepEqual(db.keys('foo'), ['bar', 'quux']);
+        });
+    });
 });

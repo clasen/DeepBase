@@ -43,6 +43,19 @@ const userBalance = mem.get(...path, "balance");
 console.log(userBalance); // 580
 ```
 
+### ⚗️ Filter set/get fields
+```js
+mem.setFilter("*.lang", (args) => {
+    return args[0].toUpperCase()
+})
+mem.getFilter("*.lang", (args) => {
+    return args[0].toLowerCase()
+})
+
+mem.set("config", "lang", 'En');
+const lang = mem.get("config", "lang"); // en
+```
+
 ### 🔥 Finally
 ```js
 mem.add("user", { name: "anya" });
@@ -52,7 +65,7 @@ console.log(userIds) // [ 'iKid4OCK', 'F3wORv_J' ]
 
 console.log(mem.get()) // db.json
 // {
-//     config: { lang: 'en' },
+//     config: { lang: 'EN' },
 //     user: {
 //         wC1a53cD: { name: 'martin', balance: 580 },
 //         ykxt9GJt: { name: 'anya' }

@@ -1,6 +1,6 @@
 {
   "name": "deepbase",
-  "version": "0.9.8",
+  "version": "1.0.2",
   "description": "⚡ Fastest and simplest way to add persistence to your projects.",
   "main": "index.js",
   "dependencies": {
