@@ -6,7 +6,7 @@ class DeepBase {
     constructor(opts = {}) {
         this.idn = 8;
         this.name = "deepbase"
-        this.path = __dirname
+        this.path = "./"
 
         this.filters = {
             set: {},
