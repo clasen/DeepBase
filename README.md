@@ -43,17 +43,10 @@ const userBalance = mem.get(...path, "balance");
 console.log(userBalance); // 580
 ```
 
-### ⚗️ Filter set/get fields
+### ⚗️ Update
 ```js
-mem.setFilter("*.lang", (args) => {
-    return args[0].toUpperCase()
-})
-mem.getFilter("*.lang", (args) => {
-    return args[0].toLowerCase()
-})
-
-mem.set("config", "lang", 'En');
-const lang = mem.get("config", "lang"); // en
+mem.upd("config", "lang", v => v.toUpperCase());
+const lang = mem.get("config", "lang"); // EN
 ```
 
 ### 🔥 Finally

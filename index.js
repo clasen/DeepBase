@@ -8,13 +8,6 @@ class DeepBase {
         this.name = "deepbase"
         this.path = "./"
 
-        this.filters = {
-            set: {},
-            get: {},
-            inc: { "*": (n) => n[0] + n[1] },
-            dec: { "*": (n) => n[0] - n[1] },
-        };
-
         Object.assign(this, opts)
 
         this.obj = {};
@@ -24,61 +17,25 @@ class DeepBase {
         }
     }
 
-    incFilter(path, filterFunc) {
-        this.filters.inc[path] = filterFunc;
-    }
-
-    decFilter(path, filterFunc) {
-        this.filters.dec[path] = filterFunc;
-    }
-
-    setFilter(path, filterFunc) {
-        this.filters.set[path] = filterFunc;
-    }
-
-    getFilter(path, filterFunc) {
-        this.filters.get[path] = filterFunc;
-    }
-
-    _matcher(arr, searchStr) {
-        // Replace * characters in each item with a regular expression that matches any character except *
-        const regexArr = arr.map(item => new RegExp(`^${item.replace(/\*/g, "[^*]*")}$`));
-        // Use the regex array to filter items that match the search string
-        return arr.filter((item, index) => regexArr[index].test(searchStr));
-    }
-
-    _filter(path, type, args) {
-        if (!this.filters[type]) return args[0];
-
-        const filters = Object.keys(this.filters[type]).reverse();
-        const key = this._matcher(filters, path.join("."));
-        if (key.length > 0) {
-            return this.filters[type][key[0]](args);
-        }
-
-        return args[0];
+    async upd(...args) {
+        const func = args.pop()
+        return this.set(...args, func(this.get(...args)))
     }
 
     async inc(...args) {
-        return this._op("inc", args)
+        const i = args.pop()
+        return this.upd(...args, n => n + i)
     }
 
     async dec(...args) {
-        return this._op("dec", args)
-    }
-
-    async _op(type, args) {
-        const keys = args.slice(0, -1);
-        let value = args[args.length - 1]
-        value = this._filter(keys, "set", [value])
-        const r = this._getRecursive(this.obj, keys.slice());
-        return this.set(...keys, this._filter(keys, type, [r, value]))
-    }
+        const i = args.pop()
+        return this.upd(...args, n => n - i)
+    }    
 
     async set(...args) {
         if (args.length < 2) return
         const keys = args.slice(0, -1)
-        const value = this._filter(keys, "set", [args[args.length - 1]])
+        const value = args[args.length - 1]
 
         this._setRecursive(this.obj, keys, value);
         await this._saveToFile();
@@ -102,8 +59,7 @@ class DeepBase {
     get(...args) {
         const keys = args.slice()
         if (keys.length == 0) return this.obj
-        const value = this._getRecursive(this.obj, keys);
-        return this._filter(args, "get", [value])
+        return this._getRecursive(this.obj, keys);
     }
 
     _getRecursive(obj, keys) {
