@@ -27,8 +27,8 @@ console.log(configLang); // "en"
 ```js
 const path = mem.add("user", { name: "martin" });
 
-// add() will create a secure key (ie. "wC1a53cD")
-console.log(path) // [ 'user', 'wC1a53cD' ]
+// add() will create a secure key (ie. "iKid4OCK")
+console.log(path) // [ 'user', 'iKid4OCK' ]
 
 const userName = mem.get(...path, "name");
 console.log(userName); // "martin"
