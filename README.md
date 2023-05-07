@@ -60,8 +60,8 @@ console.log(mem.get()) // db.json
 // {
 //     config: { lang: 'EN' },
 //     user: {
-//         wC1a53cD: { name: 'martin', balance: 580 },
-//         ykxt9GJt: { name: 'anya' }
+//         iKid4OCK: { name: 'martin', balance: 580 },
+//         F3wORv_J: { name: 'anya' }
 //     }
 // }
 ```
