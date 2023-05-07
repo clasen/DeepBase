@@ -17,7 +17,6 @@ describe('DeepBase', () => {
     describe('#set()', () => {
         it('should set a value at a given path', () => {
             db.set('foo', 'bar', 'baz');
-            console.log(db.get('foo', 'bar') == 'baz')
             assert.deepEqual(db.get('foo', 'bar'), 'baz');
         });
 
