@@ -103,16 +103,16 @@ describe('DeepBase', () => {
 
     describe('#dec()', () => {
 
-        it('should set the value to -1 if it does not exist', () => {
-            db.dec('foo', 'bar', 2);
-            assert.deepEqual(db.get('foo', 'bar'), -2);
-        });
-
         it('should save changes to disk', async () => {
             await db.set('foo', 'bar', 3);
             await db.dec('foo', 'bar', 2);
             db = new DeepBase({ name: 'test', path: __dirname }); // create a new instance to reload the saved data
             assert.deepEqual(db.get('foo', 'bar'), 1);
+        });
+
+        it('should set the value to -1 if it does not exist', () => {
+            db.dec('foo', 'bar', 2);
+            assert.deepEqual(db.get('foo', 'bar'), -2);
         });
     });
 
@@ -123,5 +123,15 @@ describe('DeepBase', () => {
             db.set('foo', 'quux', 1);
             assert.deepEqual(db.keys('foo'), ['bar', 'quux']);
         });
+    });
+
+    describe('#upd()', () => {
+
+        it('should update field keys', async () => {
+            db.set('foo', 'bar', 2);
+            db.upd('foo', 'bar', n => n * 3);
+            assert.deepEqual(db.get('foo', 'bar'), 6);
+        });
+      
     });
 });
