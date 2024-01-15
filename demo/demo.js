@@ -10,7 +10,7 @@ console.log(configLang); // "en"
 
 // ADD
 const path = mem.add("user", { name: "martin" });
-console.log(path) // [ 'user', 'iKid4OCK' ] / iKid4OCK is a random string
+console.log(path) // [ 'user', 'iKid4OCKds' ] / iKid4OCKds is a random string
 
 const userName = mem.get(...path, "name");
 console.log(userName); // "martin"
@@ -25,7 +25,7 @@ console.log(userBalance); // 2
 mem.add("user", { name: "anya" });
 
 const userIds = mem.keys("user")
-console.log(userIds) // [ 'iKid4OCK', 'F3wORv_J' ]
+console.log(userIds) // [ 'iKid4OCKds', 'FEwORvIJsa' ]
 
 // UPDATE
 mem.upd("config", "lang", v => v.toUpperCase());
@@ -37,11 +37,11 @@ console.log(mem.get()) // db.json
 //         "lang": "EN"
 //     },
 //     "user": {
-//         "iKid4OCK": {
+//         "iKid4OCKds": {
 //             "name": "martin",
 //             "count": 2
 //         },
-//         "F3wORv_J": {
+//         "FEwORvIJsa": {
 //             "name": "anya"
 //         }
 //     }

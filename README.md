@@ -27,8 +27,8 @@ console.log(configLang); // "en"
 ```js
 const path = mem.add("user", { name: "martin" });
 
-// add() will create a secure key (ie. "iKid4OCK")
-console.log(path) // [ 'user', 'iKid4OCK' ]
+// add() will create a secure key (ie. "iKidAOCKds")
+console.log(path) // [ 'user', 'iKidAOCKds' ]
 
 const userName = mem.get(...path, "name");
 console.log(userName); // "martin"
@@ -54,14 +54,14 @@ const lang = mem.get("config", "lang"); // EN
 mem.add("user", { name: "anya" });
 
 const userIds = mem.keys("user")
-console.log(userIds) // [ 'iKid4OCK', 'F3wORv_J' ]
+console.log(userIds) // [ 'iKidAOCKds', 'FEwORvJjs' ]
 
 console.log(mem.get()) // db.json
 // {
 //     config: { lang: 'EN' },
 //     user: {
-//         iKid4OCK: { name: 'martin', balance: 580 },
-//         F3wORv_J: { name: 'anya' }
+//         iKidAOCKds: { name: 'martin', balance: 580 },
+//         FEwORvJjs: { name: 'anya' }
 //     }
 // }
 ```

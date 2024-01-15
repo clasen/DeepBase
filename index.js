@@ -1,13 +1,15 @@
 const steno = require("steno")
 const fs = require("fs")
-const { nanoid } = require("nanoid");
+const { customAlphabet } = require('nanoid');
 
 class DeepBase {
     constructor(opts = {}) {
-        this.idn = 8;
+        this.nidAlphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+        this.nidLength = 10;
         this.name = "deepbase"
         this.path = "./"
 
+        this.nanoid = customAlphabet(this.nidAlphabet, this.nidLength)
         Object.assign(this, opts)
 
         this.obj = {};
@@ -30,7 +32,7 @@ class DeepBase {
     async dec(...args) {
         const i = args.pop()
         return this.upd(...args, n => n - i)
-    }    
+    }
 
     async set(...args) {
         if (args.length < 2) return
@@ -99,9 +101,9 @@ class DeepBase {
 
     add(...keys) {
         const value = keys.pop();
-        const id = nanoid(this.idn)
-        this.set(...[...keys, id, value])
-        return [...keys, id]
+        const id = this.nanoid();
+        this.set(...[...keys, id, value]);
+        return [...keys, id];
     }
 
     async _saveToFile() {
@@ -117,6 +119,11 @@ class DeepBase {
         const r = this.get(...args)
         return (r !== null && typeof r === "object") ? Object.keys(r) : [];
     }
+
+    values(...args) {
+        const r = this.get(...args)
+        return (r !== null && typeof r === "object") ? Object.values(r) : [];
+    }    
 }
 
 
