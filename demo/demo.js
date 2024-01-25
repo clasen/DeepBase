@@ -2,6 +2,9 @@ const DeepBase = require('../index');
 
 const mem = new DeepBase({ name: "demo", path: __dirname }); // db.json
 
+// Reset
+mem.del();
+
 // SET
 mem.set("config", "lang", "en");
 
@@ -26,6 +29,10 @@ mem.add("user", { name: "anya" });
 
 const userIds = mem.keys("user")
 console.log(userIds) // [ 'iKid4OCKds', 'FEwORvIJsa' ]
+
+const userValues = mem.values("user")
+console.log(userValues)
+// [ { name: 'martin', count: 2 }, { name: 'anya' }]
 
 // UPDATE
 mem.upd("config", "lang", v => v.toUpperCase());

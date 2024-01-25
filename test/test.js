@@ -125,6 +125,15 @@ describe('DeepBase', () => {
         });
     });
 
+    describe('#values()', () => {
+
+        it('should return values', async () => {
+            await db.set('foo', 'bar', 1);
+            await db.set('foo', 'quux', 1);
+            assert.deepEqual(db.values('foo'), [1, 1]);
+        });
+    });
+
     describe('#upd()', () => {
 
         it('should update field keys', async () => {
