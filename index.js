@@ -6,11 +6,15 @@ class DeepBase {
     constructor(opts = {}) {
         this.nidAlphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
         this.nidLength = 10;
-        this.name = "deepbase"
-        this.path = "./"
+        this.name = "default"
+        this.path = __dirname + "/../../db";
 
-        this.nanoid = customAlphabet(this.nidAlphabet, this.nidLength)
-        Object.assign(this, opts)
+        this.nanoid = customAlphabet(this.nidAlphabet, this.nidLength);
+        Object.assign(this, opts);
+
+        if (!fs.existsSync(this.path)) {
+            fs.mkdirSync(this.path, { recursive: true });
+        }
 
         this.obj = {};
         this.fileName = this.path + "/" + this.name + ".json"
@@ -123,7 +127,7 @@ class DeepBase {
     values(...args) {
         const r = this.get(...args)
         return (r !== null && typeof r === "object") ? Object.values(r) : [];
-    }    
+    }
 }
 
 
