@@ -1,6 +1,7 @@
 const steno = require("steno")
 const fs = require("fs")
 const { customAlphabet } = require('nanoid');
+const path = require('path');
 
 class DeepBase {
     constructor(opts = {}) {
@@ -8,16 +9,17 @@ class DeepBase {
         this.nidLength = 10;
         this.name = "default"
         this.path = __dirname + "/../../db";
-
         this.nanoid = customAlphabet(this.nidAlphabet, this.nidLength);
         Object.assign(this, opts);
+
+        this.path = path.normalize(this.path);
 
         if (!fs.existsSync(this.path)) {
             fs.mkdirSync(this.path, { recursive: true });
         }
 
         this.obj = {};
-        this.fileName = this.path + "/" + this.name + ".json"
+        this.fileName = path.join(this.path, `${this.name}.json`);
         if (fs.existsSync(this.fileName)) {
             this.obj = JSON.parse(fs.readFileSync(this.fileName, "utf8"))
         }
