@@ -1,5 +1,5 @@
-const steno = require("steno")
-const fs = require("fs")
+const steno = require("steno");
+const fs = require("fs");
 const { customAlphabet } = require('nanoid');
 const path = require('path');
 
@@ -7,7 +7,7 @@ class DeepBase {
     constructor(opts = {}) {
         this.nidAlphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
         this.nidLength = 10;
-        this.name = "default"
+        this.name = "default";
         this.path = path.join(__dirname, "..", "..", "db");
         this.nanoid = customAlphabet(this.nidAlphabet, this.nidLength);
         this.stringify = (obj) => JSON.stringify(obj, null, 4);
@@ -31,28 +31,28 @@ class DeepBase {
     }
 
     async upd(...args) {
-        const func = args.pop()
-        return this.set(...args, func(this.get(...args)))
+        const func = args.pop();
+        return this.set(...args, func(this.get(...args)));
     }
 
     async inc(...args) {
-        const i = args.pop()
-        return this.upd(...args, n => n + i)
+        const i = args.pop();
+        return this.upd(...args, n => n + i);
     }
 
     async dec(...args) {
-        const i = args.pop()
-        return this.upd(...args, n => n - i)
+        const i = args.pop();
+        return this.upd(...args, n => n - i);
     }
 
     async set(...args) {
-        if (args.length < 2) return
-        const keys = args.slice(0, -1)
-        const value = args[args.length - 1]
+        if (args.length < 2) return;
+        const keys = args.slice(0, -1);
+        const value = args[args.length - 1];
 
         this._setRecursive(this.obj, keys, value);
         await this._saveToFile();
-        return args.slice(0, -1)
+        return args.slice(0, -1);
     }
 
     _setRecursive(obj, keys, value) {
@@ -70,8 +70,8 @@ class DeepBase {
     }
 
     get(...args) {
-        const keys = args.slice()
-        if (keys.length == 0) return this.obj
+        const keys = args.slice();
+        if (keys.length == 0) return this.obj;
         return this._getRecursive(this.obj, keys);
     }
 
@@ -94,19 +94,18 @@ class DeepBase {
     }
 
     async del(...keys) {
-
         if (keys.length === 0) {
-            this.obj = {}
-            return this._saveToFile()
+            this.obj = {};
+            return this._saveToFile();
         }
 
         const key = keys.pop();
         const parentObj = this.get(...keys);
 
         if (parentObj) {
-            if (parentObj == key) this.del(...keys)
+            if (parentObj == key) this.del(...keys);
             if (parentObj.hasOwnProperty(key)) delete parentObj[key];
-            return this._saveToFile()
+            return this._saveToFile();
         }
     }
 
@@ -128,15 +127,14 @@ class DeepBase {
     }
 
     keys(...args) {
-        const r = this.get(...args)
+        const r = this.get(...args);
         return (r !== null && typeof r === "object") ? Object.keys(r) : [];
     }
 
     values(...args) {
-        const r = this.get(...args)
+        const r = this.get(...args);
         return (r !== null && typeof r === "object") ? Object.values(r) : [];
     }
 }
-
 
 module.exports = DeepBase;
