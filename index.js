@@ -8,11 +8,14 @@ class DeepBase {
         this.nidAlphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
         this.nidLength = 10;
         this.name = "default"
-        this.path = __dirname + "/../../db";
+        this.path = path.join(__dirname, "..", "..", "db");
         this.nanoid = customAlphabet(this.nidAlphabet, this.nidLength);
+        this.stringify = (obj) => JSON.stringify(obj, null, 4);
+        this.parse = JSON.parse;
+
         Object.assign(this, opts);
 
-        this.path = path.normalize(this.path);
+        this.path = path.resolve(this.path);
 
         if (!fs.existsSync(this.path)) {
             fs.mkdirSync(this.path, { recursive: true });
@@ -20,8 +23,10 @@ class DeepBase {
 
         this.obj = {};
         this.fileName = path.join(this.path, `${this.name}.json`);
+
         if (fs.existsSync(this.fileName)) {
-            this.obj = JSON.parse(fs.readFileSync(this.fileName, "utf8"))
+            const fileContent = fs.readFileSync(this.fileName, "utf8");
+            this.obj = this.parse(fileContent);
         }
     }
 
@@ -114,10 +119,11 @@ class DeepBase {
 
     async _saveToFile() {
         return new Promise((resolve, reject) => {
-            steno.writeFile(this.fileName, JSON.stringify(this.obj, null, 4), err => {
-                if (err) reject(err)
-                resolve()
-            })
+            const serializedData = this.stringify(this.obj);
+            steno.writeFile(this.fileName, serializedData, err => {
+                if (err) reject(err);
+                resolve();
+            });
         });
     }
 

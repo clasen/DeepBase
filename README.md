@@ -66,6 +66,28 @@ console.log(mem.get()) // db.json
 // }
 ```
 
+## 🧪 Custom JSON Serialization
+
+DeepBase supports custom JSON serialization, allowing for circular references in complex data structures.
+
+### Example with `CircularJSON`:
+```javascript
+const CircularJSON = require('circular-json');
+const db = new DeepBase({
+    stringify: (obj) => CircularJSON.stringify(obj, null, 4),
+    parse: CircularJSON.parse
+});
+
+db.set("a", "b", { circular: {} });
+db.set("a", "b", "circular", "self", customDB.get("a", "b"));
+```
+
+### Example with `flatted`:
+```javascript
+const { parse, stringify } = require('flatted');
+const db = new DeepBase({ stringify, parse });
+```
+
 ## 🤯 Features
 - 🔍 Easily access and modify nested objects in JSON storage.
 - 📁 Automatically save changes to a file.
