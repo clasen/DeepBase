@@ -69,10 +69,15 @@ class DeepBase {
         this._setRecursive(obj[key], keys, value);
     }
 
-    get(...args) {
+    getRef(...args) {
         const keys = args.slice();
         if (keys.length == 0) return this.obj;
         return this._getRecursive(this.obj, keys);
+    }
+
+    get(...args) {
+        const value = this.getRef(...args);
+        return typeof value === 'object' && value !== null ? JSON.parse(JSON.stringify(value)) : value;
     }
 
     _getRecursive(obj, keys) {
@@ -100,7 +105,7 @@ class DeepBase {
         }
 
         const key = keys.pop();
-        const parentObj = this.get(...keys);
+        const parentObj = this.getRef(...keys);
 
         if (parentObj) {
             if (parentObj == key) this.del(...keys);

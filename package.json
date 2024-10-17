@@ -1,6 +1,6 @@
 {
   "name": "deepbase",
-  "version": "1.1.8",
+  "version": "1.2.2",
   "description": "⚡ Fastest and simplest way to add persistence to your projects.",
   "main": "index.js",
   "dependencies": {
@@ -30,7 +30,8 @@
     "circular-json",
     "flatted",
     "reference",
-    "pointer"
+    "pointer",
+    "clasen"
   ],
   "author": "Martin Clasen",
   "license": "MIT",
