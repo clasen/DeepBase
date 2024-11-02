@@ -46,7 +46,12 @@ class DeepBase {
     }
 
     async set(...args) {
-        if (args.length < 2) return;
+        if (args.length < 2) {
+            this.obj = args[0];
+            await this._saveToFile();
+            return [];
+        }
+
         const keys = args.slice(0, -1);
         const value = args[args.length - 1];
 

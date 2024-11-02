@@ -10,6 +10,7 @@
   "license": "ISC",
   "dependencies": {
     "circular-json": "^0.5.9",
+    "crypto-js": "^4.2.0",
     "flatted": "^3.3.1"
   }
 }

@@ -88,6 +88,39 @@ const { parse, stringify } = require('flatted');
 const db = new DeepBase({ stringify, parse });
 ```
 
+### 🔒 Secure Storage with Encryption
+```javascript
+const CryptoJS = require('crypto-js');
+
+class DeepbaseSecure extends DeepBase {
+    constructor(opts) {
+        opts.stringify = (obj) => {
+            const iv = CryptoJS.lib.WordArray.random(128 / 8);
+            const encrypted = CryptoJS.AES.encrypt(JSON.stringify(obj), opts.encryptionKey, { iv });
+            return iv.toString(CryptoJS.enc.Hex) + ':' + encrypted.toString();
+        };
+
+        opts.parse = (encryptedData) => {
+            const [ivHex, encrypted] = encryptedData.split(':');
+            const iv = CryptoJS.enc.Hex.parse(ivHex);
+            const bytes = CryptoJS.AES.decrypt(encrypted, opts.encryptionKey, { iv });
+            return JSON.parse(bytes.toString(CryptoJS.enc.Utf8));
+        };
+
+        super(opts);
+    }
+}
+
+// Create an encrypted database
+const secureDB = new DeepbaseSecure({
+    name: "secure_db",
+    encryptionKey: 'your-secret-key'
+});
+
+// Use it like a regular DeepBase instance
+secureDB.set("users", "admin", { password: "secret123" });
+```
+
 ## 🤯 Features
 - 🔍 Easily access and modify nested objects in JSON storage.
 - 📁 Automatically save changes to a file.
