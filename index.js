@@ -145,6 +145,11 @@ class DeepBase {
         const r = this.get(...args);
         return (r !== null && typeof r === "object") ? Object.values(r) : [];
     }
+
+    entries(...args) {
+        const r = this.get(...args);
+        return (r !== null && typeof r === "object") ? Object.entries(r) : [];
+    }
 }
 
 module.exports = DeepBase;
