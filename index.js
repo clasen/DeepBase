@@ -26,7 +26,7 @@ class DeepBase {
 
         if (fs.existsSync(this.fileName)) {
             const fileContent = fs.readFileSync(this.fileName, "utf8");
-            this.obj = this.parse(fileContent);
+            this.obj = fileContent ? this.parse(fileContent) : {};
         }
     }
 
