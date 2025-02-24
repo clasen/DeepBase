@@ -4,6 +4,8 @@ const { customAlphabet } = require('nanoid');
 const path = require('path');
 
 class DeepBase {
+    static _instances = {};
+
     constructor(opts = {}) {
         this.nidAlphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
         this.nidLength = 10;
@@ -24,10 +26,19 @@ class DeepBase {
         this.obj = {};
         this.fileName = path.join(this.path, `${this.name}.json`);
 
+        // Check if an instance with this fileName already exists
+        if (DeepBase._instances[this.fileName]) {
+            return DeepBase._instances[this.fileName];
+        }
+
+        // If it's a new fileName, initialize the instance
         if (fs.existsSync(this.fileName)) {
             const fileContent = fs.readFileSync(this.fileName, "utf8");
             this.obj = fileContent ? this.parse(fileContent) : {};
         }
+
+        // Store this instance in the static map
+        DeepBase._instances[this.fileName] = this;
     }
 
     async upd(...args) {
