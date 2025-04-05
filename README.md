@@ -11,52 +11,52 @@ npm install deepbase
 
 ## 🔧 Usage
 ```js
-const DeepBase = require("deepbase");
+import DeepBase from "deepbase"; // or... const DeepBase = require("deepbase");
 const mem = new DeepBase({ name: "db" }); // db.json
 ```
 
 ### ✍️ Setting Values
 ```js
-mem.set("config", "lang", "en");
+await mem.set("config", "lang", "en");
 
-const configLang = mem.get("config", "lang");
+const configLang = await mem.get("config", "lang");
 console.log(configLang); // "en"
 ```
 
 ### ✅ Adding Rows
 ```js
-const path = mem.add("user", { name: "martin" });
+const path = await mem.add("user", { name: "martin" });
 
 // add() will create a secure key (ie. "iKidAOCKds")
 console.log(path) // [ 'user', 'iKidAOCKds' ]
 
-const userName = mem.get(...path, "name");
+const userName = await mem.get(...path, "name");
 console.log(userName); // "martin"
 ```
 
 ### 🔢 Increment fields
 ```js
-mem.inc(...path, "balance", 160);
-mem.inc(...path, "balance", 420);
+await mem.inc(...path, "balance", 160);
+await mem.inc(...path, "balance", 420);
 
-const userBalance = mem.get(...path, "balance");
+const userBalance = await mem.get(...path, "balance");
 console.log(userBalance); // 580
 ```
 
 ### ⚗️ Update
 ```js
-mem.upd("config", "lang", v => v.toUpperCase());
-const lang = mem.get("config", "lang"); // EN
+await mem.upd("config", "lang", v => v.toUpperCase());
+const lang = await mem.get("config", "lang"); // EN
 ```
 
 ### 🔥 Finally
 ```js
-mem.add("user", { name: "anya" });
+await mem.add("user", { name: "anya" });
 
-const userIds = mem.keys("user")
+const userIds = await mem.keys("user")
 console.log(userIds) // [ 'iKidAOCKds', 'FEwORvJjs' ]
 
-console.log(mem.get()) // db.json
+console.log(await mem.get()) // db.json
 // {
 //     config: { lang: 'EN' },
 //     user: {
@@ -78,8 +78,8 @@ const db = new DeepBase({
     parse: CircularJSON.parse
 });
 
-db.set("a", "b", { circular: {} });
-db.set("a", "b", "circular", "self", customDB.get("a", "b"));
+await db.set("a", "b", { circular: {} });
+await db.set("a", "b", "circular", "self", await db.get("a", "b"));
 ```
 
 ### Example with `flatted`:
@@ -118,7 +118,7 @@ const secureDB = new DeepbaseSecure({
 });
 
 // Use it like a regular DeepBase instance
-secureDB.set("users", "admin", { password: "secret123" });
+await secureDB.set("users", "admin", { password: "secret123" });
 ```
 
 ## 🤯 Features
