@@ -15,13 +15,13 @@ const customDB = new DeepBase({
 });
 
 // Reset the custom database
-customDB.del();
+await customDB.del();
 
 // Set some data
-customDB.set("a", "b", { circular: {} });
-customDB.set("a", "b", "circular", "self", customDB.getRef("a", "b"));
+await customDB.set("a", "b", { circular: {} });
+await customDB.set("a", "b", "circular", "self", await customDB.getRef("a", "b"));
 
 // Retrieve and log the data
-const retrievedData = customDB.getRef("a", "b");
+const retrievedData = await customDB.getRef("a", "b");
 console.log("Retrieved data:", retrievedData);
 console.log("Circular reference preserved:", retrievedData.circular.self === retrievedData);

@@ -14,19 +14,16 @@ const customDB = new DeepBase({
     parse: CircularJSON.parse
 });
 
-async function main() {
 
 
-    // Reset the custom database
-    customDB.del();
+// Reset the custom database
+await customDB.del();
 
-    // Set some data
-    const path = await customDB.set("a", "b", { circular: {} });
-    customDB.set(...path, "circular", "self", customDB.getRef(...path));
+// Set some data
+const path = await customDB.set("a", "b", { circular: {} });
+await customDB.set(...path, "circular", "self", await customDB.getRef(...path));
 
-    // Retrieve and log the data
-    const retrievedData = customDB.getRef(...path);
-    console.log("Retrieved data:", retrievedData);
-    console.log("Circular reference preserved:", retrievedData.circular.self === retrievedData);
-
-} main();
+// Retrieve and log the data
+const retrievedData = await customDB.getRef(...path);
+console.log("Retrieved data:", retrievedData);
+console.log("Circular reference preserved:", retrievedData.circular.self === retrievedData);

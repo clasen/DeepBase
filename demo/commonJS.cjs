@@ -2,55 +2,57 @@ const DeepBase = require('../index.cjs');
 
 const mem = new DeepBase({ name: "demo", path: __dirname }); // db.json
 
-// Reset
-mem.del();
+main(); async function main() {
+    // Reset
+    await mem.del();
 
-// SET
-mem.set("config", "lang", "en");
+    // SET
+    await mem.set("config", "lang", "en");
 
-const configLang = mem.get("config", "lang");
-console.log(configLang); // "en"
+    const configLang = await mem.get("config", "lang");
+    console.log(configLang); // "en"
 
-// ADD
-const userPath = mem.add("user", { name: "martin" });
-console.log(userPath) // [ 'user', 'iKid4OCKds' ] / iKid4OCKds is a random string
+    // ADD
+    const path = await mem.add("user", { name: "martin" });
+    console.log(path) // [ 'user', 'iKid4OCKds' ] / iKid4OCKds is a random string
 
-const userName = mem.get(...userPath, "name");
-console.log(userName); // "martin"
+    const userName = await mem.get(...path, "name");
+    console.log(userName); // "martin"
 
-// INC
-mem.inc(...userPath, "count", 1);
-mem.inc(...userPath, "count", 1);
+    // INC
+    await mem.inc(...path, "count", 1);
+    await mem.inc(...path, "count", 1);
 
-const userBalance = mem.get(...userPath, "count");
-console.log(userBalance); // 2
+    const userBalance = await mem.get(...path, "count");
+    console.log(userBalance); // 2
 
-mem.add("user", { name: "anya" });
+    await mem.add("user", { name: "anya" });
 
-const userIds = mem.keys("user")
-console.log(userIds) // [ 'iKid4OCKds', 'FEwORvIJsa' ]
+    const userIds = await mem.keys("user")
+    console.log(userIds) // [ 'iKid4OCKds', 'FEwORvIJsa' ]
 
-const userValues = mem.values("user")
-console.log(userValues)
-// [ { name: 'martin', count: 2 }, { name: 'anya' }]
+    const userValues = await mem.values("user")
+    console.log(userValues)
+    // [ { name: 'martin', count: 2 }, { name: 'anya' }]
 
-// UPDATE
-mem.upd("config", "lang", v => v.toUpperCase());
-const lang = mem.get("config", "lang"); // EN
+    // UPDATE
+    await mem.upd("config", "lang", v => v.toUpperCase());
+    const lang = await mem.get("config", "lang"); // EN
 
-console.log(mem.get()) // db.json
-// {
-//     "config": {
-//         "lang": "EN"
-//     },
-//     "user": {
-//         "iKid4OCKds": {
-//             "name": "martin",
-//             "count": 2
-//         },
-//         "FEwORvIJsa": {
-//             "name": "anya"
-//         }
-//     }
-// }
+    console.log(await mem.get()) // db.json
+    // {
+    //     "config": {
+    //         "lang": "EN"
+    //     },
+    //     "user": {
+    //         "iKid4OCKds": {
+    //             "name": "martin",
+    //             "count": 2
+    //         },
+    //         "FEwORvIJsa": {
+    //             "name": "anya"
+    //         }
+    //     }
+    // }
 
+}

@@ -32,12 +32,12 @@ const BDS = new DeepbaseSecure({
 });
 
 // Reset the custom database
-BDS.del();
+await BDS.del();
 
 // Set some data
 const path = await BDS.set("user", "name", "anya");
-BDS.set(...path, "user", "age", 1);
+await BDS.set(...path, "user", "age", 1);
 
 // Retrieve and log the data
-const retrievedData = BDS.get(...path);
+const retrievedData = await BDS.get(...path);
 console.log("Retrieved data:", retrievedData);

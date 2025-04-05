@@ -8,42 +8,42 @@ const __dirname = dirname(__filename);
 const mem = new DeepBase({ name: "demo", path: __dirname }); // db.json
 
 // Reset
-mem.del();
+await mem.del();
 
 // SET
-mem.set("config", "lang", "en");
+await mem.set("config", "lang", "en");
 
-const configLang = mem.get("config", "lang");
+const configLang = await mem.get("config", "lang");
 console.log(configLang); // "en"
 
 // ADD
-const path = mem.add("user", { name: "martin" });
+const path = await mem.add("user", { name: "martin" });
 console.log(path) // [ 'user', 'iKid4OCKds' ] / iKid4OCKds is a random string
 
-const userName = mem.get(...path, "name");
+const userName = await mem.get(...path, "name");
 console.log(userName); // "martin"
 
 // INC
-mem.inc(...path, "count", 1);
-mem.inc(...path, "count", 1);
+await mem.inc(...path, "count", 1);
+await mem.inc(...path, "count", 1);
 
-const userBalance = mem.get(...path, "count");
+const userBalance = await mem.get(...path, "count");
 console.log(userBalance); // 2
 
-mem.add("user", { name: "anya" });
+await mem.add("user", { name: "anya" });
 
-const userIds = mem.keys("user")
+const userIds = await mem.keys("user")
 console.log(userIds) // [ 'iKid4OCKds', 'FEwORvIJsa' ]
 
-const userValues = mem.values("user")
+const userValues = await mem.values("user")
 console.log(userValues)
 // [ { name: 'martin', count: 2 }, { name: 'anya' }]
 
 // UPDATE
-mem.upd("config", "lang", v => v.toUpperCase());
-const lang = mem.get("config", "lang"); // EN
+await mem.upd("config", "lang", v => v.toUpperCase());
+const lang = await mem.get("config", "lang"); // EN
 
-console.log(mem.get()) // db.json
+console.log(await mem.get()) // db.json
 // {
 //     "config": {
 //         "lang": "EN"

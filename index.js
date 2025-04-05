@@ -42,7 +42,7 @@ class DeepBase {
 
     async upd(...args) {
         const func = args.pop();
-        return this.set(...args, func(this.get(...args)));
+        return this.set(...args, func(await this.get(...args)));
     }
 
     async inc(...args) {
@@ -84,14 +84,14 @@ class DeepBase {
         this._setRecursive(obj[key], keys, value);
     }
 
-    getRef(...args) {
+    async getRef(...args) {
         const keys = args.slice();
         if (keys.length == 0) return this.obj;
         return this._getRecursive(this.obj, keys);
     }
 
-    get(...args) {
-        const value = this.getRef(...args);
+    async get(...args) {
+        const value = await this.getRef(...args);
         return typeof value === 'object' && value !== null ? JSON.parse(JSON.stringify(value)) : value;
     }
 
@@ -120,19 +120,19 @@ class DeepBase {
         }
 
         const key = keys.pop();
-        const parentObj = this.getRef(...keys);
+        const parentObj = await this.getRef(...keys);
 
         if (parentObj) {
-            if (parentObj == key) this.del(...keys);
+            if (parentObj == key) await this.del(...keys);
             if (parentObj.hasOwnProperty(key)) delete parentObj[key];
             return this._saveToFile();
         }
     }
 
-    add(...keys) {
+    async add(...keys) {
         const value = keys.pop();
         const id = this.nanoid();
-        this.set(...[...keys, id, value]);
+        await this.set(...[...keys, id, value]);
         return [...keys, id];
     }
 
@@ -146,18 +146,18 @@ class DeepBase {
         });
     }
 
-    keys(...args) {
-        const r = this.get(...args);
+    async keys(...args) {
+        const r = await this.get(...args);
         return (r !== null && typeof r === "object") ? Object.keys(r) : [];
     }
 
-    values(...args) {
-        const r = this.get(...args);
+    async values(...args) {
+        const r = await this.get(...args);
         return (r !== null && typeof r === "object") ? Object.values(r) : [];
     }
 
-    entries(...args) {
-        const r = this.get(...args);
+    async entries(...args) {
+        const r = await this.get(...args);
         return (r !== null && typeof r === "object") ? Object.entries(r) : [];
     }
 }
