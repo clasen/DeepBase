@@ -1,7 +1,7 @@
-const steno = require("steno");
-const fs = require("fs");
-const { customAlphabet } = require('nanoid');
-const path = require('path');
+import steno from 'steno';
+import fs from 'fs';
+import { customAlphabet } from 'nanoid';
+import path from 'path';
 
 class DeepBase {
     static _instances = {};
@@ -10,13 +10,12 @@ class DeepBase {
         this.nidAlphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
         this.nidLength = 10;
         this.name = "default";
-        this.path = path.join(__dirname, "..", "..", "db");
+        this.path = new URL('../../db', import.meta.url).pathname;
         this.nanoid = customAlphabet(this.nidAlphabet, this.nidLength);
         this.stringify = (obj) => JSON.stringify(obj, null, 4);
         this.parse = JSON.parse;
 
         Object.assign(this, opts);
-
         this.path = path.resolve(this.path);
 
         if (!fs.existsSync(this.path)) {
@@ -163,4 +162,4 @@ class DeepBase {
     }
 }
 
-module.exports = DeepBase;
+export default DeepBase;

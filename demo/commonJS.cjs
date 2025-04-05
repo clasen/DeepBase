@@ -1,9 +1,4 @@
-import DeepBase from '../index.js';
-import { fileURLToPath } from 'url';
-import { dirname } from 'path';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+const DeepBase = require('../index.cjs');
 
 const mem = new DeepBase({ name: "demo", path: __dirname }); // db.json
 
@@ -17,17 +12,17 @@ const configLang = mem.get("config", "lang");
 console.log(configLang); // "en"
 
 // ADD
-const path = mem.add("user", { name: "martin" });
-console.log(path) // [ 'user', 'iKid4OCKds' ] / iKid4OCKds is a random string
+const userPath = mem.add("user", { name: "martin" });
+console.log(userPath) // [ 'user', 'iKid4OCKds' ] / iKid4OCKds is a random string
 
-const userName = mem.get(...path, "name");
+const userName = mem.get(...userPath, "name");
 console.log(userName); // "martin"
 
 // INC
-mem.inc(...path, "count", 1);
-mem.inc(...path, "count", 1);
+mem.inc(...userPath, "count", 1);
+mem.inc(...userPath, "count", 1);
 
-const userBalance = mem.get(...path, "count");
+const userBalance = mem.get(...userPath, "count");
 console.log(userBalance); // 2
 
 mem.add("user", { name: "anya" });

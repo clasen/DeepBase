@@ -1,5 +1,10 @@
 import DeepBase from '../index.js';
+import { fileURLToPath } from 'url';
+import { dirname } from 'path';
 import CryptoJS from 'crypto-js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 class DeepbaseSecure extends DeepBase {
     constructor(opts) {
@@ -22,7 +27,7 @@ class DeepbaseSecure extends DeepBase {
 // Create a new DeepBase instance with custom serializer and deserializer
 const BDS = new DeepbaseSecure({
     name: "demo_secure",
-    path: new URL('.', import.meta.url).pathname,
+    path: __dirname,
     encryptionKey: 'secret'
 });
 
