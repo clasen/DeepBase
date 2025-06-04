@@ -102,7 +102,7 @@ class DeepBase {
         }
 
         if (keys.length === 1) {
-            return obj[keys[0]] === undefined ? null : obj[keys[0]];
+            return obj === null || obj[keys[0]] === undefined ? null : obj[keys[0]];
         }
 
         const key = keys.shift();
