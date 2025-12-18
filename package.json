@@ -1,6 +1,6 @@
 {
   "name": "deepbase-monorepo",
-  "version": "3.1.4",
+  "version": "3.1.6",
   "description": "DeepBase - Multi-driver persistence system monorepo",
   "private": true,
   "type": "module",
