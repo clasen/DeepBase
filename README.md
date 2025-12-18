@@ -12,6 +12,7 @@ DeepBase is a powerful, flexible database abstraction that lets you use multiple
 - 🚀 **Built-in migration**: Easy data migration between drivers
 - 🛡️ **Automatic fallback**: System continues working even if primary driver fails
 - 🌍 **Cross-platform**: Works on Node.js, Bun, Deno (with appropriate drivers)
+- 🔒 **Concurrency-safe**: Race condition protection for all concurrent operations
 
 ## 📦 Packages
 
@@ -235,6 +236,37 @@ new DeepBase(drivers, options)
 - `await db.syncAll(options)` - Sync primary to all other drivers
 - `db.getDriver(index)` - Get driver by index
 - `db.getDrivers()` - Get all drivers
+
+## 🔒 Concurrency Safety
+
+DeepBase v3.0+ provides **built-in race condition protection** for all drivers:
+
+### Protected Operations
+- ✅ `inc()` / `dec()` - Atomic increment/decrement
+- ✅ `upd()` - Atomic read-modify-write
+- ✅ `set()` - Safe concurrent writes
+- ✅ `add()` - Unique ID generation without collisions
+
+### How it Works
+
+**SQLite Driver**: Uses native SQLite transactions for atomic operations
+```javascript
+// 100 concurrent increments = exactly 100 (no race conditions)
+await Promise.all(
+  Array.from({ length: 100 }, () => db.inc('counter', 1))
+);
+```
+
+**JSON Driver**: Uses operation queue to serialize writes
+```javascript
+// Concurrent updates are safe - no data loss
+await Promise.all([
+  db.upd('account', acc => ({ ...acc, balance: acc.balance + 50 })),
+  db.upd('account', acc => ({ ...acc, lastAccess: Date.now() }))
+]);
+```
+
+See [`examples/08-concurrency-safe.js`](./examples/08-concurrency-safe.js) for detailed examples and [`RACE_CONDITION_FIX.md`](./RACE_CONDITION_FIX.md) for technical details.
 
 ## 🎯 Available Drivers
 

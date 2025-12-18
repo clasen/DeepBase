@@ -42,5 +42,5 @@
   "bugs": {
     "url": "https://github.com/clasen/DeepBase/issues"
   },
-  "homepage": "https://github.com/clasen/DeepBase#readme"
+  "homepage": "https://github.com/clasen/DeepBase/tree/main/packages/driver-sqlite"
 }

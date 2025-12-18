@@ -44,6 +44,12 @@ npm run example4
 ```
 Advanced setup with MongoDB (primary), JSON (backup), and Redis (cache).
 
+### Example 8: Concurrency-Safe Operations
+```bash
+node 08-concurrency-safe.js
+```
+Demonstrates race condition protection in concurrent operations (banking, inventory, orders).
+
 ## What You'll Learn
 
 - **Single driver usage**: Basic operations with JSON filesystem driver
@@ -51,6 +57,7 @@ Advanced setup with MongoDB (primary), JSON (backup), and Redis (cache).
 - **Data migration**: Moving data between different backends
 - **Automatic fallback**: How the system handles driver failures
 - **Three-tier architecture**: Building resilient systems with multiple backends
+- **Concurrency safety**: How DeepBase prevents race conditions in concurrent operations
 
 ## Notes
 

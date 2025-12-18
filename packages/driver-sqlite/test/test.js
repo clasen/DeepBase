@@ -500,6 +500,103 @@ describe('SqliteDriver', function() {
       });
     });
   });
+
+  describe('Race Conditions', function() {
+    it('should handle 100 concurrent increments correctly', async function() {
+      this.timeout(5000);
+      
+      await db.set('counter', 0);
+      
+      // Run 100 concurrent increments
+      const promises = Array.from({ length: 100 }, () => db.inc('counter', 1));
+      await Promise.all(promises);
+      
+      const result = await db.get('counter');
+      assert.strictEqual(result, 100, 'All increments should be applied atomically');
+    });
+
+    it('should handle concurrent read-modify-write operations', async function() {
+      this.timeout(5000);
+      
+      await db.set('data', { counter: 0, items: [] });
+      
+      // Run 50 concurrent updates that read, modify, and write
+      const promises = Array.from({ length: 50 }, (_, i) =>
+        db.upd('data', (current) => ({
+          counter: current.counter + 1,
+          items: [...current.items, `item-${current.counter}`]
+        }))
+      );
+      
+      await Promise.all(promises);
+      
+      const finalData = await db.get('data');
+      assert.strictEqual(finalData.counter, 50, 'Counter should be exactly 50');
+      assert.strictEqual(finalData.items.length, 50, 'Should have exactly 50 items');
+      
+      // Check that all items have unique values
+      const uniqueItems = new Set(finalData.items);
+      assert.strictEqual(uniqueItems.size, 50, 'All items should be unique');
+    });
+
+    it('should handle concurrent sets on different keys', async function() {
+      this.timeout(5000);
+      
+      // Run 50 concurrent set operations on different keys
+      const promises = Array.from({ length: 50 }, (_, i) =>
+        db.set('users', `user${i}`, { name: `User ${i}`, value: i })
+      );
+      
+      await Promise.all(promises);
+      
+      // Verify all keys exist and have correct values
+      const users = await db.get('users');
+      assert.strictEqual(Object.keys(users).length, 50, 'Should have 50 users');
+      
+      for (let i = 0; i < 50; i++) {
+        assert.deepStrictEqual(
+          users[`user${i}`],
+          { name: `User ${i}`, value: i },
+          `User ${i} should have correct data`
+        );
+      }
+    });
+
+    it('should handle concurrent add operations with unique IDs', async function() {
+      this.timeout(5000);
+      
+      await db.set('items', {});
+      
+      // Run 50 concurrent add operations
+      const promises = Array.from({ length: 50 }, (_, i) =>
+        db.add('items', { value: i })
+      );
+      
+      const results = await Promise.all(promises);
+      
+      // Verify all items were added with unique IDs
+      const items = await db.get('items');
+      assert.strictEqual(Object.keys(items).length, 50, 'Should have 50 items');
+      
+      // Check that all IDs are unique
+      const ids = results.map(r => r[r.length - 1]);
+      const uniqueIds = new Set(ids);
+      assert.strictEqual(uniqueIds.size, 50, 'All IDs should be unique');
+    });
+
+    it('should handle concurrent decrements correctly', async function() {
+      this.timeout(5000);
+      
+      await db.set('inventory', 1000);
+      
+      // Run 100 concurrent decrements
+      const promises = Array.from({ length: 100 }, () => db.dec('inventory', 5));
+      await Promise.all(promises);
+      
+      const result = await db.get('inventory');
+      assert.strictEqual(result, 500, 'All decrements should be applied atomically');
+    });
+  });
 });
 
 

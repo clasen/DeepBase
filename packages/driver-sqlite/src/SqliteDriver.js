@@ -57,6 +57,10 @@ export class SqliteDriver extends DeepBaseDriver {
   }
   
   async get(...args) {
+    return this._getSync(args);
+  }
+  
+  _getSync(args) {
     if (args.length === 0) {
       // Get root object
       return this._getRootObject();
@@ -106,14 +110,23 @@ export class SqliteDriver extends DeepBaseDriver {
       return [];
     }
     
+    return this._setSync(args);
+  }
+  
+  _setSync(args) {
     const keys = args.slice(0, -1);
     const value = args[args.length - 1];
     const key = this._pathToKey(keys);
     
-    // Check if any parent path exists as an object that needs to be expanded
-    this._expandParentObjects(keys);
+    // Use transaction to make expansion and set atomic
+    const transaction = this.db.transaction(() => {
+      // Check if any parent path exists as an object that needs to be expanded
+      this._expandParentObjects(keys);
+      
+      this.setStmt.run(key, JSON.stringify(value));
+    });
     
-    this.setStmt.run(key, JSON.stringify(value));
+    transaction();
     return keys;
   }
   
@@ -126,12 +139,17 @@ export class SqliteDriver extends DeepBaseDriver {
     
     const key = this._pathToKey(keys);
     
-    // Delete the key itself
-    this.delStmt.run(key);
+    // Use transaction to make deletion atomic
+    const transaction = this.db.transaction(() => {
+      // Delete the key itself
+      this.delStmt.run(key);
+      
+      // Delete all children
+      const childKey = key + '.';
+      this.db.prepare('DELETE FROM deepbase WHERE key LIKE ?').run(childKey + '%');
+    });
     
-    // Delete all children
-    const childKey = key + '.';
-    this.db.prepare('DELETE FROM deepbase WHERE key LIKE ?').run(childKey + '%');
+    transaction();
   }
   
   async inc(...args) {
@@ -153,7 +171,17 @@ export class SqliteDriver extends DeepBaseDriver {
   
   async upd(...args) {
     const func = args.pop();
-    return this.set(...args, func(await this.get(...args)));
+    const keys = args;
+    
+    // Use transaction to make get+set atomic
+    const transaction = this.db.transaction(() => {
+      const currentValue = this._getSync(keys);
+      const newValue = func(currentValue);
+      this._setSync([...keys, newValue]);
+      return keys;
+    });
+    
+    return transaction();
   }
   
   _getRootObject() {

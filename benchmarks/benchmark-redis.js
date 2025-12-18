@@ -3,6 +3,8 @@ import RedisDriver from '../packages/driver-redis/src/index.js';
 
 const ITERATIONS = 1000;
 const BATCH_SIZE = 100;
+const CONCURRENT_OPS = 1000; // For concurrent tests
+const CONCURRENCY_LEVEL = 50; // Simulated concurrent clients
 
 function getMemoryUsage() {
   const used = process.memoryUsage();
@@ -140,6 +142,88 @@ async function benchmark() {
   console.log(`   ✓ ${BATCH_SIZE} parallel writes in ${batchTime.toFixed(2)}ms`);
   console.log(`   ✓ ${batchOps.toFixed(2)} ops/sec\n`);
 
+  // ========================================
+  // CONCURRENT OPERATIONS TESTS
+  // ========================================
+  console.log('═══════════════════════════════════════════════════════════');
+  console.log('  CONCURRENT OPERATIONS (Real-World Performance)');
+  console.log('═══════════════════════════════════════════════════════════\n');
+
+  // 8. Concurrent Write Performance
+  console.log(`🔥 Testing CONCURRENT WRITE (${CONCURRENCY_LEVEL} parallel clients)...`);
+  await db.del('concurrent_items'); // Clear
+  const concWriteStart = performance.now();
+  const concWritePromises = [];
+  for (let i = 0; i < CONCURRENT_OPS; i++) {
+    concWritePromises.push(
+      db.set('concurrent_items', `item_${i}`, {
+        id: i,
+        name: `Item ${i}`,
+        timestamp: Date.now()
+      })
+    );
+  }
+  await Promise.all(concWritePromises);
+  const concWriteTime = performance.now() - concWriteStart;
+  const concWriteOps = CONCURRENT_OPS / (concWriteTime / 1000);
+  console.log(`   ✓ ${CONCURRENT_OPS} concurrent writes in ${concWriteTime.toFixed(2)}ms`);
+  console.log(`   ✓ ${concWriteOps.toFixed(2)} ops/sec\n`);
+
+  // 9. Concurrent Read Performance
+  console.log(`📚 Testing CONCURRENT READ (${CONCURRENCY_LEVEL} parallel clients)...`);
+  const concReadStart = performance.now();
+  const concReadPromises = [];
+  for (let i = 0; i < CONCURRENT_OPS; i++) {
+    concReadPromises.push(db.get('concurrent_items', `item_${i}`));
+  }
+  await Promise.all(concReadPromises);
+  const concReadTime = performance.now() - concReadStart;
+  const concReadOps = CONCURRENT_OPS / (concReadTime / 1000);
+  console.log(`   ✓ ${CONCURRENT_OPS} concurrent reads in ${concReadTime.toFixed(2)}ms`);
+  console.log(`   ✓ ${concReadOps.toFixed(2)} ops/sec\n`);
+
+  // 10. Mixed Concurrent Operations (75% read, 25% write - realistic workload)
+  console.log('🔀 Testing MIXED CONCURRENT operations (75% read, 25% write)...');
+  const mixedOps = 1000;
+  const mixedStart = performance.now();
+  const mixedPromises = [];
+  for (let i = 0; i < mixedOps; i++) {
+    if (Math.random() < 0.75) {
+      // 75% reads
+      mixedPromises.push(db.get('concurrent_items', `item_${Math.floor(Math.random() * CONCURRENT_OPS)}`));
+    } else {
+      // 25% writes
+      mixedPromises.push(
+        db.set('concurrent_items', `item_${Math.floor(Math.random() * CONCURRENT_OPS)}`, {
+          updated: true,
+          timestamp: Date.now()
+        })
+      );
+    }
+  }
+  await Promise.all(mixedPromises);
+  const mixedTime = performance.now() - mixedStart;
+  const mixedOpsPerSec = mixedOps / (mixedTime / 1000);
+  console.log(`   ✓ ${mixedOps} mixed operations in ${mixedTime.toFixed(2)}ms`);
+  console.log(`   ✓ ${mixedOpsPerSec.toFixed(2)} ops/sec\n`);
+
+  // 11. Concurrent Increments (stress test)
+  console.log('➕ Testing CONCURRENT INCREMENTS (atomic operations)...');
+  await db.set('stress', 'counter', 0);
+  const stressOps = 500;
+  const stressStart = performance.now();
+  const stressPromises = [];
+  for (let i = 0; i < stressOps; i++) {
+    stressPromises.push(db.inc('stress', 'counter', 1));
+  }
+  await Promise.all(stressPromises);
+  const finalCount = await db.get('stress', 'counter');
+  const stressTime = performance.now() - stressStart;
+  const stressOpsPerSec = stressOps / (stressTime / 1000);
+  console.log(`   ✓ ${stressOps} concurrent increments in ${stressTime.toFixed(2)}ms`);
+  console.log(`   ✓ ${stressOpsPerSec.toFixed(2)} ops/sec`);
+  console.log(`   ✓ Final counter value: ${finalCount} (should be ${stressOps})\n`);
+
   await db.disconnect();
 
   // Final memory state
@@ -149,12 +233,21 @@ async function benchmark() {
   console.log('═══════════════════════════════════════════════════════════');
   console.log('  SUMMARY - Redis Driver (Vanilla)');
   console.log('═══════════════════════════════════════════════════════════');
+  console.log('  SEQUENTIAL OPERATIONS');
+  console.log('───────────────────────────────────────────────────────────');
   console.log(`  Write:        ${writeOps.toFixed(2)} ops/sec`);
   console.log(`  Read:         ${readOps.toFixed(2)} ops/sec`);
   console.log(`  Update:       ${updateOps.toFixed(2)} ops/sec`);
   console.log(`  Increment:    ${incOps.toFixed(2)} ops/sec`);
   console.log(`  Delete:       ${delOps.toFixed(2)} ops/sec`);
   console.log(`  Batch Write:  ${batchOps.toFixed(2)} ops/sec`);
+  console.log('───────────────────────────────────────────────────────────');
+  console.log('  CONCURRENT OPERATIONS');
+  console.log('───────────────────────────────────────────────────────────');
+  console.log(`  Concurrent Write:     ${concWriteOps.toFixed(2)} ops/sec`);
+  console.log(`  Concurrent Read:      ${concReadOps.toFixed(2)} ops/sec`);
+  console.log(`  Mixed Operations:     ${mixedOpsPerSec.toFixed(2)} ops/sec`);
+  console.log(`  Concurrent Increment: ${stressOpsPerSec.toFixed(2)} ops/sec`);
   console.log('───────────────────────────────────────────────────────────');
   console.log('  MEMORY USAGE');
   console.log('───────────────────────────────────────────────────────────');
