@@ -1,0 +1,13 @@
+{
+    "app": {
+        "version": "1.0.0",
+        "name": "MyApp"
+    },
+    "users": {
+        "xOhYmdtSbY": {
+            "name": "Charlie",
+            "email": "charlie@example.com",
+            "role": "admin"
+        }
+    }
+}

@@ -1,0 +1,35 @@
+{
+    "config": {
+        "lang": "en",
+        "theme": "dark"
+    },
+    "users": {
+        "JFTKBPLkAD": {
+            "name": "Alice",
+            "age": 30,
+            "balance": 150
+        },
+        "rykhPlppXT": {
+            "name": "Bob",
+            "age": 25
+        },
+        "bmnxHHBhJo": {
+            "name": "Alice",
+            "age": 30,
+            "balance": 150
+        },
+        "hImqJlKRpK": {
+            "name": "Bob",
+            "age": 25
+        },
+        "KBDNuqlRBt": {
+            "name": "Alice",
+            "age": 30,
+            "balance": 150
+        },
+        "PUpGifwgQY": {
+            "name": "Bob",
+            "age": 25
+        }
+    }
+}

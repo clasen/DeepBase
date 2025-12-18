@@ -1,0 +1,46 @@
+{
+  "name": "deepbase-sqlite",
+  "version": "3.1.4",
+  "description": "⚡ DeepBase SQLite - SQLite database driver",
+  "type": "module",
+  "main": "src/index.cjs",
+  "module": "src/index.js",
+  "exports": {
+    ".": {
+      "require": "./src/index.cjs",
+      "import": "./src/index.js"
+    }
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.8.1"
+  },
+  "peerDependencies": {
+    "deepbase": "^3.1.4"
+  },
+  "scripts": {
+    "test": "mocha test/test.js"
+  },
+  "devDependencies": {
+    "mocha": "^10.8.2"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/clasen/DeepBase.git"
+  },
+  "keywords": [
+    "deepbase",
+    "sqlite",
+    "sqlite3",
+    "driver",
+    "database",
+    "persist",
+    "nested",
+    "objects"
+  ],
+  "author": "Martin Clasen",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/clasen/DeepBase/issues"
+  },
+  "homepage": "https://github.com/clasen/DeepBase#readme"
+}

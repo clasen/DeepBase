@@ -1,56 +1,52 @@
 {
-  "name": "deepbase",
+  "name": "deepbase-monorepo",
+  "version": "3.1.4",
+  "description": "DeepBase - Multi-driver persistence system monorepo",
+  "private": true,
   "type": "module",
-  "version": "2.0.4",
-  "description": "⚡ Fastest and simplest way to add persistence to your projects.",
-  "main": "index.js",
-  "module": "./index.js",
-  "exports": {
-    ".": {
-      "require": "./index.cjs",
-      "import": "./index.js"
-    }
-  },  
-  "dependencies": {
-    "nanoid": "^5.1.2",
-    "steno": "^0.4.4"
-  },
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
-    "test": "mocha"
-  },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/clasen/DeepBase.git"
+    "test": "npm test -w deepbase && npm test -w deepbase-json && npm test -w deepbase-mongodb && npm test -w deepbase-redis && npm test -w deepbase-redis-json && npm test -w deepbase-sqlite",
+    "test:core": "npm test -w deepbase",
+    "test:json": "npm test -w deepbase-json",
+    "test:mongodb": "npm test -w deepbase-mongodb",
+    "test:redis": "npm test -w deepbase-redis",
+    "test:redis-json": "npm test -w deepbase-redis-json",
+    "test:sqlite": "npm test -w deepbase-sqlite",
+    "bench:json": "cd benchmarks && node benchmark-json.js",
+    "bench:mongodb": "cd benchmarks && node benchmark-mongodb.js",
+    "bench:redis": "cd benchmarks && node benchmark-redis.js",
+    "bench:redis-json": "cd benchmarks && node benchmark-redis-json.js",
+    "bench:sqlite": "cd benchmarks && node benchmark-sqlite.js",
+    "bench:compare": "cd benchmarks && node benchmark-compare.js",
+    "bench:migration": "cd benchmarks && node benchmark-migration.js",
+    "bench:all": "npm run bench:json && npm run bench:mongodb && npm run bench:redis && npm run bench:redis-json && npm run bench:sqlite && npm run bench:compare && npm run bench:migration",
+    "example1": "cd examples && node 01-simple-json.js",
+    "example2": "cd examples && node 02-multi-driver.js",
+    "example3": "cd examples && node 03-migration.js",
+    "example4": "cd examples && node 04-three-tier.js",
+    "example5": "cd examples && node 05-sqlite.js",
+    "publish": "node scripts/publish.js",
+    "publish:patch": "node scripts/publish.js patch",
+    "publish:minor": "node scripts/publish.js minor",
+    "publish:major": "node scripts/publish.js major",
+    "publish:dry": "node scripts/publish.js --dry-run"
   },
   "keywords": [
-    "json",
+    "deepbase",
     "database",
-    "persist",
-    "nested",
-    "objects",
-    "user-friendly",
-    "intuitive",
-    "reliable",
-    "synchronization",
-    "mocking",
-    "structure",
-    "lowdb",
-    "circular-json",
-    "flatted",
-    "reference",
-    "pointer",
-    "clasen"
+    "persistence",
+    "multi-driver",
+    "mongodb",
+    "redis",
+    "json"
   ],
   "author": "Martin Clasen",
   "license": "MIT",
-  "bugs": {
-    "url": "https://github.com/clasen/DeepBase/issues"
-  },
-  "homepage": "https://github.com/clasen/DeepBase#readme",
-  "devDependencies": {
-    "mocha": "^11.1.0"
-  },
-  "directories": {
-    "test": "test"
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/clasen/DeepBase.git"
   }
 }

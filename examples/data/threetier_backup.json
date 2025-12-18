@@ -1,0 +1,13 @@
+{
+    "system": {
+        "status": "operational",
+        "uptime": 3700
+    },
+    "orders": {
+        "QdFaJyKSUk": {
+            "customer": "Alice",
+            "total": 299.99,
+            "status": "pending"
+        }
+    }
+}

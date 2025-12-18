@@ -1,0 +1,17 @@
+{
+  "name": "deepbase-benchmarks",
+  "version": "1.0.0",
+  "description": "Performance benchmarks for DeepBase",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "bench:json": "node benchmark-json.js",
+    "bench:mongodb": "node benchmark-mongodb.js",
+    "bench:redis": "node benchmark-redis.js",
+    "bench:redis-json": "node benchmark-redis-json.js",
+    "bench:compare": "node benchmark-compare.js",
+    "bench:migration": "node benchmark-migration.js",
+    "bench:all": "npm run bench:json && npm run bench:mongodb && npm run bench:redis && npm run bench:redis-json && npm run bench:compare && npm run bench:migration"
+  }
+}
+

@@ -1,0 +1,35 @@
+{
+    "config": {
+        "lang": "en",
+        "theme": "dark"
+    },
+    "users": {
+        "yAnvLtoPGo": {
+            "name": "Alice",
+            "age": 30,
+            "balance": 150
+        },
+        "qqrKMxmuWf": {
+            "name": "Bob",
+            "age": 25
+        },
+        "NMuPVcsmtF": {
+            "name": "Alice",
+            "age": 30,
+            "balance": 150
+        },
+        "aGOyWqcaSR": {
+            "name": "Bob",
+            "age": 25
+        },
+        "ZRrLfNTtgE": {
+            "name": "Alice",
+            "age": 30,
+            "balance": 150
+        },
+        "VJXsrqhBmw": {
+            "name": "Bob",
+            "age": 25
+        }
+    }
+}

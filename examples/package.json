@@ -1,0 +1,18 @@
+{
+  "name": "deepbase-examples",
+  "version": "1.0.0",
+  "description": "Examples for DeepBase multi-driver system",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "example1": "node 01-simple-json.js",
+    "example2": "node 02-multi-driver.js",
+    "example3": "node 03-migration.js",
+    "example4": "node 04-three-tier.js",
+    "example5": "node 05-sqlite.js",
+    "example6": "node 06-flatted.js"
+  },
+  "dependencies": {
+    "flatted": "^3.3.3"
+  }
+}
