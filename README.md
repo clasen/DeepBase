@@ -13,6 +13,7 @@ DeepBase is a powerful, flexible database abstraction that lets you use multiple
 - 🛡️ **Automatic fallback**: System continues working even if primary driver fails
 - 🌍 **Cross-platform**: Works on Node.js, Bun, Deno (with appropriate drivers)
 - 🔒 **Concurrency-safe**: Race condition protection for all concurrent operations
+- ⏱️ **Timeout support**: Configurable timeouts to prevent hanging operations
 
 ## 📦 Packages
 
@@ -214,6 +215,11 @@ new DeepBase(drivers, options)
   - `writeAll` (default: `true`): Write to all drivers
   - `readFirst` (default: `true`): Read from first available driver
   - `failOnPrimaryError` (default: `true`): Throw if primary driver fails
+  - `lazyConnect` (default: `true`): Auto-connect on first operation
+  - `timeout` (default: `0`): Global timeout in ms (0 = disabled)
+  - `readTimeout` (default: `timeout`): Timeout for read operations in ms
+  - `writeTimeout` (default: `timeout`): Timeout for write operations in ms
+  - `connectTimeout` (default: `timeout`): Timeout for connection in ms
 
 ### Core Methods
 
@@ -266,7 +272,51 @@ await Promise.all([
 ]);
 ```
 
-See [`examples/08-concurrency-safe.js`](./examples/08-concurrency-safe.js) for detailed examples and [`RACE_CONDITION_FIX.md`](./RACE_CONDITION_FIX.md) for technical details.
+See [`examples/08-concurrency-safe.js`](./examples/08-concurrency-safe.js) for detailed examples.
+
+## ⏱️ Timeout Configuration
+
+Prevent operations from hanging indefinitely with configurable timeouts:
+
+```javascript
+import DeepBase, { JsonDriver } from 'deepbase';
+
+// Global timeout for all operations
+const db = new DeepBase(new JsonDriver(), {
+  timeout: 5000  // 5 seconds for all operations
+});
+
+// Different timeouts for reads and writes
+const db2 = new DeepBase([
+  new RedisDriver({ url: 'redis://slow-server:6379' }),
+  new JsonDriver({ path: './backup' }) // Fallback if Redis times out
+], {
+  readTimeout: 2000,   // 2 seconds for reads (get, keys, values, entries)
+  writeTimeout: 5000,  // 5 seconds for writes (set, del, inc, dec, add, upd)
+  connectTimeout: 10000 // 10 seconds for connection
+});
+
+try {
+  const value = await db.get('some', 'key');
+} catch (error) {
+  // Error: get() timed out after 2000ms
+  console.error(error.message);
+}
+```
+
+**Timeout Options:**
+- `timeout` (default: `0`): Global timeout in milliseconds for all operations (0 = disabled)
+- `readTimeout` (default: `timeout`): Timeout for read operations
+- `writeTimeout` (default: `timeout`): Timeout for write operations  
+- `connectTimeout` (default: `timeout`): Timeout for connection operation
+
+**Use Cases:**
+- 🛡️ **Network issues**: Prevent hanging on slow/unresponsive database servers
+- 🔄 **Fast failover**: Combined with multi-driver setup for automatic fallback
+- ⚡ **Performance SLAs**: Enforce response time requirements
+- 🐛 **Debugging**: Identify slow operations during development
+
+See [`examples/09-timeout.js`](./examples/09-timeout.js) for examples and [`TIMEOUT_FEATURE.md`](./TIMEOUT_FEATURE.md) for detailed documentation.
 
 ## 🎯 Available Drivers
 

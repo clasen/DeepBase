@@ -73,6 +73,41 @@ const db = new DeepBase([
 await db.connect();
 ```
 
+## Timeout Configuration
+
+Prevent operations from hanging indefinitely with configurable timeouts:
+
+```javascript
+import DeepBase, { JsonDriver } from 'deepbase';
+
+// Global timeout for all operations
+const db = new DeepBase(new JsonDriver(), {
+  timeout: 5000  // 5 seconds
+});
+
+// Different timeouts for reads and writes
+const db2 = new DeepBase(new JsonDriver(), {
+  readTimeout: 3000,   // 3 seconds for reads
+  writeTimeout: 10000  // 10 seconds for writes
+});
+
+// All operations will timeout if they exceed the limit
+try {
+  await db.get('some', 'key');
+} catch (error) {
+  // Error: get() timed out after 5000ms
+  console.error(error.message);
+}
+```
+
+**Timeout Options:**
+- `timeout`: Global timeout for all operations (default: `0` = disabled)
+- `readTimeout`: Timeout for `get`, `keys`, `values`, `entries` (default: `timeout`)
+- `writeTimeout`: Timeout for `set`, `del`, `inc`, `dec`, `add`, `upd` (default: `timeout`)
+- `connectTimeout`: Timeout for connection operation (default: `timeout`)
+
+See [TIMEOUT_FEATURE.md](../../TIMEOUT_FEATURE.md) for detailed documentation.
+
 ## API
 
 ### Constructor
@@ -87,6 +122,11 @@ new DeepBase(drivers, options)
   - `writeAll` (default: `true`): Write to all drivers
   - `readFirst` (default: `true`): Read from first available
   - `failOnPrimaryError` (default: `true`): Throw on primary failure
+  - `lazyConnect` (default: `true`): Auto-connect on first operation
+  - `timeout` (default: `0`): Global timeout in ms (0 = disabled)
+  - `readTimeout` (default: `timeout`): Timeout for read operations in ms
+  - `writeTimeout` (default: `timeout`): Timeout for write operations in ms
+  - `connectTimeout` (default: `timeout`): Timeout for connection in ms
 
 ### Methods
 

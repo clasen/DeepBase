@@ -1,8 +1,28 @@
 import { DeepBaseDriver } from './DeepBaseDriver.js';
 import { JsonDriver } from 'deepbase-json';
 
+/**
+ * Helper to wrap a promise with a timeout
+ * @param {Promise} promise - The promise to wrap
+ * @param {number} ms - Timeout in milliseconds
+ * @param {string} operation - Name of the operation (for error messages)
+ * @returns {Promise} Promise that rejects on timeout
+ */
+function withTimeout(promise, ms, operation = 'operation') {
+  if (!ms || ms <= 0) {
+    return promise;
+  }
+  
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => 
+      setTimeout(() => reject(new Error(`${operation} timed out after ${ms}ms`)), ms)
+    )
+  ]);
+}
+
 export class DeepBase {
-  constructor(drivers = [], {writeAll, readFirst, failOnPrimaryError, lazyConnect, ...opts} = {}) {
+  constructor(drivers = [], {writeAll, readFirst, failOnPrimaryError, lazyConnect, timeout, readTimeout, writeTimeout, ...opts} = {}) {
     // Support backward compatibility: new DeepBase({ name: "db" })
     // If first argument is a plain object (not a driver), treat it as JsonDriver options
     if (!Array.isArray(drivers) && !(drivers instanceof DeepBaseDriver) && 
@@ -34,28 +54,38 @@ export class DeepBase {
       readFirst: readFirst !== false, // Read from first available
       failOnPrimaryError: failOnPrimaryError !== false,
       lazyConnect: lazyConnect !== false, // Auto-connect on first operation by default
+      timeout: timeout || 0, // Global timeout in ms (0 = disabled)
+      readTimeout: readTimeout || timeout || 0, // Read operations timeout in ms
+      writeTimeout: writeTimeout || timeout || 0, // Write operations timeout in ms
+      connectTimeout: opts.connectTimeout || timeout || 0, // Connection timeout in ms
       ...opts
     };
   }
   
   async connect() {
-    const results = await Promise.allSettled(
-      this.drivers.map(driver => driver.connect())
-    );
-    
-    const errors = results
-      .filter(r => r.status === 'rejected')
-      .map((r, i) => ({ driver: this.drivers[i], error: r.reason }));
-    
-    if (errors.length > 0 && this.opts.failOnPrimaryError && 
-        results[0].status === 'rejected') {
-      throw errors[0].error;
-    }
-    
-    return { 
-      connected: results.filter(r => r.status === 'fulfilled').length,
-      total: this.drivers.length 
+    const operation = async () => {
+      const results = await Promise.allSettled(
+        this.drivers.map(driver => driver.connect())
+      );
+      
+      const errors = results
+        .filter(r => r.status === 'rejected')
+        .map((r, i) => ({ driver: this.drivers[i], error: r.reason }));
+      
+      if (errors.length > 0 && this.opts.failOnPrimaryError && 
+          results[0].status === 'rejected') {
+        throw errors[0].error;
+      }
+      
+      return { 
+        connected: results.filter(r => r.status === 'fulfilled').length,
+        total: this.drivers.length 
+      };
     };
+    
+    // Use timeout for connection (default to general timeout)
+    const connectTimeout = this.opts.connectTimeout || this.opts.timeout;
+    return withTimeout(operation(), connectTimeout, 'connect()');
   }
   
   async _ensureConnected() {
@@ -81,137 +111,165 @@ export class DeepBase {
   async get(...args) {
     await this._ensureConnected();
     
-    if (this.opts.readFirst) {
-      // Try drivers in order until one succeeds
-      for (const driver of this.drivers) {
-        try {
-          return await driver.get(...args);
-        } catch (error) {
-          // If this is the last driver, throw the error
-          if (driver === this.drivers[this.drivers.length - 1]) {
-            throw error;
+    const operation = async () => {
+      if (this.opts.readFirst) {
+        // Try drivers in order until one succeeds
+        for (const driver of this.drivers) {
+          try {
+            return await driver.get(...args);
+          } catch (error) {
+            // If this is the last driver, throw the error
+            if (driver === this.drivers[this.drivers.length - 1]) {
+              throw error;
+            }
+            // Otherwise, continue to next driver
           }
-          // Otherwise, continue to next driver
         }
+      } else {
+        // Race: return first successful response
+        return Promise.any(
+          this.drivers.map(driver => driver.get(...args))
+        );
       }
-    } else {
-      // Race: return first successful response
-      return Promise.any(
-        this.drivers.map(driver => driver.get(...args))
-      );
-    }
+    };
+    
+    return withTimeout(operation(), this.opts.readTimeout, 'get()');
   }
   
   async set(...args) {
     await this._ensureConnected();
     
-    if (this.opts.writeAll) {
-      // Write to all drivers
-      const results = await Promise.allSettled(
-        this.drivers.map(driver => driver.set(...args))
-      );
-      
-      // Check if primary driver succeeded
-      if (this.opts.failOnPrimaryError && results[0].status === 'rejected') {
-        throw results[0].reason;
+    const operation = async () => {
+      if (this.opts.writeAll) {
+        // Write to all drivers
+        const results = await Promise.allSettled(
+          this.drivers.map(driver => driver.set(...args))
+        );
+        
+        // Check if primary driver succeeded
+        if (this.opts.failOnPrimaryError && results[0].status === 'rejected') {
+          throw results[0].reason;
+        }
+        
+        // Return result from primary driver
+        return results[0].status === 'fulfilled' ? results[0].value : null;
+      } else {
+        // Write only to primary driver
+        return this.drivers[0].set(...args);
       }
-      
-      // Return result from primary driver
-      return results[0].status === 'fulfilled' ? results[0].value : null;
-    } else {
-      // Write only to primary driver
-      return this.drivers[0].set(...args);
-    }
+    };
+    
+    return withTimeout(operation(), this.opts.writeTimeout, 'set()');
   }
   
   async del(...args) {
     await this._ensureConnected();
     
-    if (this.opts.writeAll) {
-      const results = await Promise.allSettled(
-        this.drivers.map(driver => driver.del(...args))
-      );
-      
-      if (this.opts.failOnPrimaryError && results[0].status === 'rejected') {
-        throw results[0].reason;
+    const operation = async () => {
+      if (this.opts.writeAll) {
+        const results = await Promise.allSettled(
+          this.drivers.map(driver => driver.del(...args))
+        );
+        
+        if (this.opts.failOnPrimaryError && results[0].status === 'rejected') {
+          throw results[0].reason;
+        }
+        
+        return results[0].status === 'fulfilled' ? results[0].value : null;
+      } else {
+        return this.drivers[0].del(...args);
       }
-      
-      return results[0].status === 'fulfilled' ? results[0].value : null;
-    } else {
-      return this.drivers[0].del(...args);
-    }
+    };
+    
+    return withTimeout(operation(), this.opts.writeTimeout, 'del()');
   }
   
   async inc(...args) {
     await this._ensureConnected();
     
-    if (this.opts.writeAll) {
-      const results = await Promise.allSettled(
-        this.drivers.map(driver => driver.inc(...args))
-      );
-      
-      if (this.opts.failOnPrimaryError && results[0].status === 'rejected') {
-        throw results[0].reason;
+    const operation = async () => {
+      if (this.opts.writeAll) {
+        const results = await Promise.allSettled(
+          this.drivers.map(driver => driver.inc(...args))
+        );
+        
+        if (this.opts.failOnPrimaryError && results[0].status === 'rejected') {
+          throw results[0].reason;
+        }
+        
+        return results[0].status === 'fulfilled' ? results[0].value : null;
+      } else {
+        return this.drivers[0].inc(...args);
       }
-      
-      return results[0].status === 'fulfilled' ? results[0].value : null;
-    } else {
-      return this.drivers[0].inc(...args);
-    }
+    };
+    
+    return withTimeout(operation(), this.opts.writeTimeout, 'inc()');
   }
   
   async dec(...args) {
     await this._ensureConnected();
     
-    if (this.opts.writeAll) {
-      const results = await Promise.allSettled(
-        this.drivers.map(driver => driver.dec(...args))
-      );
-      
-      if (this.opts.failOnPrimaryError && results[0].status === 'rejected') {
-        throw results[0].reason;
+    const operation = async () => {
+      if (this.opts.writeAll) {
+        const results = await Promise.allSettled(
+          this.drivers.map(driver => driver.dec(...args))
+        );
+        
+        if (this.opts.failOnPrimaryError && results[0].status === 'rejected') {
+          throw results[0].reason;
+        }
+        
+        return results[0].status === 'fulfilled' ? results[0].value : null;
+      } else {
+        return this.drivers[0].dec(...args);
       }
-      
-      return results[0].status === 'fulfilled' ? results[0].value : null;
-    } else {
-      return this.drivers[0].dec(...args);
-    }
+    };
+    
+    return withTimeout(operation(), this.opts.writeTimeout, 'dec()');
   }
   
   async add(...args) {
     await this._ensureConnected();
     
-    if (this.opts.writeAll) {
-      const results = await Promise.allSettled(
-        this.drivers.map(driver => driver.add(...args))
-      );
-      
-      if (this.opts.failOnPrimaryError && results[0].status === 'rejected') {
-        throw results[0].reason;
+    const operation = async () => {
+      if (this.opts.writeAll) {
+        const results = await Promise.allSettled(
+          this.drivers.map(driver => driver.add(...args))
+        );
+        
+        if (this.opts.failOnPrimaryError && results[0].status === 'rejected') {
+          throw results[0].reason;
+        }
+        
+        return results[0].status === 'fulfilled' ? results[0].value : null;
+      } else {
+        return this.drivers[0].add(...args);
       }
-      
-      return results[0].status === 'fulfilled' ? results[0].value : null;
-    } else {
-      return this.drivers[0].add(...args);
-    }
+    };
+    
+    return withTimeout(operation(), this.opts.writeTimeout, 'add()');
   }
   
   async upd(...args) {
     await this._ensureConnected();
     
-    if (this.opts.writeAll) {
-      const results = await Promise.allSettled(
-        this.drivers.map(driver => driver.upd(...args))
-      );
-      
-      if (this.opts.failOnPrimaryError && results[0].status === 'rejected') {
-        throw results[0].reason;
+    const operation = async () => {
+      if (this.opts.writeAll) {
+        const results = await Promise.allSettled(
+          this.drivers.map(driver => driver.upd(...args))
+        );
+        
+        if (this.opts.failOnPrimaryError && results[0].status === 'rejected') {
+          throw results[0].reason;
+        }
+        
+        return results[0].status === 'fulfilled' ? results[0].value : null;
+      } else {
+        return this.drivers[0].upd(...args);
       }
-      
-      return results[0].status === 'fulfilled' ? results[0].value : null;
-    } else {
-      return this.drivers[0].upd(...args);
-    }
+    };
+    
+    return withTimeout(operation(), this.opts.writeTimeout, 'upd()');
   }
   
   async keys(...args) {
