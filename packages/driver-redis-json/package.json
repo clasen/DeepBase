@@ -1,6 +1,6 @@
 {
   "name": "deepbase-redis-json",
-  "version": "3.1.8",
+  "version": "3.2.0",
   "description": "⚡ DeepBase Redis Stack (RedisJSON) - driver",
   "type": "module",
   "main": "src/index.cjs",
@@ -15,7 +15,7 @@
     "redis": "^4.7.0"
   },
   "peerDependencies": {
-    "deepbase": "^3.1.8"
+    "deepbase": "^3.2.0"
   },
   "scripts": {
     "test": "mocha test/test.js"
