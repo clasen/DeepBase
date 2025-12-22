@@ -1,6 +1,6 @@
 {
   "name": "deepbase-redis",
-  "version": "3.2.0",
+  "version": "3.2.2",
   "description": "⚡ DeepBase Redis (vanilla) - driver",
   "type": "module",
   "main": "src/index.cjs",
