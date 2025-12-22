@@ -106,7 +106,7 @@ try {
 - `writeTimeout`: Timeout for `set`, `del`, `inc`, `dec`, `add`, `upd` (default: `timeout`)
 - `connectTimeout`: Timeout for connection operation (default: `timeout`)
 
-See [TIMEOUT_FEATURE.md](../../TIMEOUT_FEATURE.md) for detailed documentation.
+See [TIMEOUT_FEATURE.md](https://github.com/clasen/DeepBase/blob/main/TIMEOUT_FEATURE.md) for detailed documentation.
 
 ## API
 
