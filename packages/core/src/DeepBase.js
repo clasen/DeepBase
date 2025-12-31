@@ -1,5 +1,4 @@
 import { DeepBaseDriver } from './DeepBaseDriver.js';
-import { JsonDriver } from 'deepbase-json';
 
 /**
  * Helper to wrap a promise with a timeout
@@ -21,6 +20,23 @@ function withTimeout(promise, ms, operation = 'operation') {
   ]);
 }
 
+/**
+ * Dynamically import JsonDriver only when needed
+ * @param {object} options - Options for JsonDriver
+ * @returns {Promise<DeepBaseDriver>} JsonDriver instance
+ */
+async function createJsonDriver(options = {}) {
+  try {
+    const { JsonDriver } = await import('deepbase-json');
+    return new JsonDriver(options);
+  } catch (error) {
+    throw new Error(
+      'JsonDriver not available. ' +
+      'Please provide a driver or install deepbase-json: npm install deepbase-json'
+    );
+  }
+}
+
 export class DeepBase {
   constructor(drivers = [], {writeAll, readFirst, failOnPrimaryError, lazyConnect, timeout, readTimeout, writeTimeout, ...opts} = {}) {
     // Support backward compatibility: new DeepBase({ name: "db" })
@@ -28,26 +44,19 @@ export class DeepBase {
     if (!Array.isArray(drivers) && !(drivers instanceof DeepBaseDriver) && 
         typeof drivers === 'object' && drivers !== null) {
       // First argument is options object for JsonDriver
-      const jsonDriverOptions = drivers;
-      drivers = [new JsonDriver(jsonDriverOptions)];
+      // Store options and create driver lazily
+      this._jsonDriverOptions = drivers;
+      drivers = [];
     } else {
       // Normalize to array
       drivers = Array.isArray(drivers) ? drivers : [drivers];
     }
     
-    // If no drivers provided, use JsonDriver with default options
-    if (drivers.length === 0) {
-      drivers = [new JsonDriver()];
-    }
+    // Store original drivers array
+    this._initialDrivers = drivers;
+    this._driversInitialized = false;
     
     this.drivers = drivers;
-    
-    // Validate drivers
-    for (const driver of this.drivers) {
-      if (!(driver instanceof DeepBaseDriver)) {
-        throw new Error('All drivers must extend DeepBaseDriver');
-      }
-    }
     
     this.opts = {
       writeAll: writeAll !== false, // Write to all drivers by default
@@ -62,7 +71,34 @@ export class DeepBase {
     };
   }
   
+  async _initializeDrivers() {
+    if (this._driversInitialized) {
+      return;
+    }
+    
+    // If we need to create a JsonDriver from options
+    if (this._jsonDriverOptions) {
+      const jsonDriver = await createJsonDriver(this._jsonDriverOptions);
+      this.drivers = [jsonDriver];
+    } else if (this.drivers.length === 0) {
+      // No drivers provided, try to create default JsonDriver
+      const jsonDriver = await createJsonDriver();
+      this.drivers = [jsonDriver];
+    }
+    
+    // Validate drivers
+    for (const driver of this.drivers) {
+      if (!(driver instanceof DeepBaseDriver)) {
+        throw new Error('All drivers must extend DeepBaseDriver');
+      }
+    }
+    
+    this._driversInitialized = true;
+  }
+  
   async connect() {
+    await this._initializeDrivers();
+    
     const operation = async () => {
       const results = await Promise.allSettled(
         this.drivers.map(driver => driver.connect())
@@ -89,6 +125,11 @@ export class DeepBase {
   }
   
   async _ensureConnected() {
+    // Initialize drivers first if needed
+    if (!this._driversInitialized) {
+      await this._initializeDrivers();
+    }
+    
     // Only auto-connect if lazyConnect is enabled
     if (!this.opts.lazyConnect) {
       return;
@@ -270,6 +311,46 @@ export class DeepBase {
     };
     
     return withTimeout(operation(), this.opts.writeTimeout, 'upd()');
+  }
+  
+  async pop(...args) {
+    await this._ensureConnected();
+    
+    const operation = async () => {
+      const allKeys = await this.keys(...args);
+      
+      if (allKeys.length === 0) {
+        return undefined;
+      }
+      
+      const lastKey = allKeys[allKeys.length - 1];
+      const value = await this.get(...args, lastKey);
+      await this.del(...args, lastKey);
+      
+      return value;
+    };
+    
+    return withTimeout(operation(), this.opts.writeTimeout, 'pop()');
+  }
+  
+  async shift(...args) {
+    await this._ensureConnected();
+    
+    const operation = async () => {
+      const allKeys = await this.keys(...args);
+      
+      if (allKeys.length === 0) {
+        return undefined;
+      }
+      
+      const firstKey = allKeys[0];
+      const value = await this.get(...args, firstKey);
+      await this.del(...args, firstKey);
+      
+      return value;
+    };
+    
+    return withTimeout(operation(), this.opts.writeTimeout, 'shift()');
   }
   
   async keys(...args) {

@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DeepBase IndexedDB - Simple Example</title>
+  
+  <!-- Import map to resolve bare module specifiers in browser -->
+  <script type="importmap">
+    {
+      "imports": {
+        "deepbase": "../packages/core/src/index.js",
+        "nanoid": "https://cdn.jsdelivr.net/npm/nanoid@5.1.5/index.browser.js"
+      }
+    }
+  </script>
+  
+  <style>
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 20px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+    }
+    .container {
+      background: white;
+      padding: 30px;
+      border-radius: 10px;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+    }
+    h1 {
+      color: #333;
+      margin-top: 0;
+    }
+    .section {
+      margin: 20px 0;
+      padding: 15px;
+      background: #f5f5f5;
+      border-radius: 5px;
+    }
+    input, button {
+      padding: 10px;
+      font-size: 14px;
+      border-radius: 5px;
+      border: 1px solid #ddd;
+      margin: 5px 5px 5px 0;
+    }
+    button {
+      background: #667eea;
+      color: white;
+      border: none;
+      cursor: pointer;
+      font-weight: bold;
+    }
+    button:hover {
+      background: #5568d3;
+    }
+    .output {
+      background: #333;
+      color: #0f0;
+      padding: 15px;
+      border-radius: 5px;
+      font-family: 'Courier New', monospace;
+      font-size: 12px;
+      margin-top: 10px;
+      max-height: 300px;
+      overflow-y: auto;
+    }
+    .error {
+      color: #f44336;
+    }
+    .success {
+      color: #4CAF50;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🌐 DeepBase IndexedDB - Simple Example</h1>
+    
+    <div class="section">
+      <h3>Basic Operations</h3>
+      <button onclick="initDB()">1. Initialize Database</button>
+      <button onclick="setData()">2. Set Data</button>
+      <button onclick="getData()">3. Get Data</button>
+      <button onclick="deleteData()">4. Delete Data</button>
+    </div>
+    
+    <div class="section">
+      <h3>User Management</h3>
+      <input type="text" id="userName" placeholder="Name" />
+      <input type="email" id="userEmail" placeholder="Email" />
+      <button onclick="addUser()">Add User</button>
+      <button onclick="listUsers()">List Users</button>
+    </div>
+    
+    <div class="section">
+      <h3>Counter</h3>
+      <button onclick="incrementCounter()">Increment (+1)</button>
+      <button onclick="decrementCounter()">Decrement (-1)</button>
+      <button onclick="getCounter()">Get Counter</button>
+      <button onclick="resetCounter()">Reset</button>
+    </div>
+    
+    <div class="section">
+      <h3>Advanced</h3>
+      <button onclick="testConcurrency()">Test Concurrency</button>
+      <button onclick="clearDatabase()">Clear Database</button>
+    </div>
+    
+    <div class="output" id="output">
+      Console output will appear here...<br>
+    </div>
+  </div>
+
+  <script type="module">
+    try {
+      // Import DeepBase (now works in browser without bundler thanks to import maps!)
+      const DeepBaseModule = await import('../packages/core/src/index.js');
+      const IndexedDBModule = await import('../packages/driver-indexeddb/src/index.js');
+      
+      const DeepBase = DeepBaseModule.default;
+      const IndexedDBDriver = IndexedDBModule.IndexedDBDriver;
+      
+      // Make available globally
+      window.DeepBase = DeepBase;
+      window.IndexedDBDriver = IndexedDBDriver;
+      window.db = null;
+      window.modulesLoaded = true;
+      
+      console.log('✓ Modules loaded successfully');
+      console.log('DeepBase:', DeepBase);
+      console.log('IndexedDBDriver:', IndexedDBDriver);
+      
+      // Trigger the load event handler if it was waiting
+      if (window.modulesLoadedCallback) {
+        window.modulesLoadedCallback();
+      }
+    } catch (error) {
+      console.error('✗ Failed to load modules:', error);
+      window.moduleLoadError = error;
+      // Show error in UI
+      setTimeout(() => {
+        const output = document.getElementById('output');
+        if (output) {
+          output.innerHTML += `<span class="error">✗ Module loading failed: ${error.message}</span><br>`;
+          output.innerHTML += `<span class="error">Stack: ${error.stack}</span><br>`;
+        }
+      }, 100);
+    }
+  </script>
+
+  <script>
+    function log(message, type = 'info') {
+      const output = document.getElementById('output');
+      const time = new Date().toLocaleTimeString();
+      const className = type === 'error' ? 'error' : type === 'success' ? 'success' : '';
+      output.innerHTML += `<span class="${className}">[${time}] ${message}</span><br>`;
+      output.scrollTop = output.scrollHeight;
+      console.log(message);
+    }
+
+    async function initDB() {
+      try {
+        if (window.db) {
+          log('Database already initialized', 'info');
+          return;
+        }
+        
+        if (!window.DeepBase || !window.IndexedDBDriver) {
+          if (window.moduleLoadError) {
+            throw new Error('Modules failed to load: ' + window.moduleLoadError.message);
+          }
+          throw new Error('Modules not loaded yet. Please wait a moment and try again.');
+        }
+        
+        window.db = new window.DeepBase(new window.IndexedDBDriver({
+          name: 'example-app',
+          version: 1
+        }));
+        
+        await window.db.connect();
+        log('✓ Database initialized successfully', 'success');
+        
+        // Initialize counter if not exists
+        const counter = await window.db.get('counter');
+        if (counter === null) {
+          await window.db.set('counter', 0);
+          log('✓ Counter initialized to 0', 'success');
+        }
+      } catch (error) {
+        log('✗ Error: ' + error.message, 'error');
+      }
+    }
+
+    async function setData() {
+      try {
+        if (!window.db) throw new Error('Database not initialized');
+        
+        await window.db.set('config', 'theme', 'dark');
+        await window.db.set('config', 'language', 'en');
+        await window.db.set('config', 'notifications', true);
+        
+        log('✓ Data set: config = {theme: "dark", language: "en", notifications: true}', 'success');
+      } catch (error) {
+        log('✗ Error: ' + error.message, 'error');
+      }
+    }
+
+    async function getData() {
+      try {
+        if (!window.db) throw new Error('Database not initialized');
+        
+        const config = await window.db.get('config');
+        log('✓ Retrieved config: ' + JSON.stringify(config, null, 2), 'success');
+      } catch (error) {
+        log('✗ Error: ' + error.message, 'error');
+      }
+    }
+
+    async function deleteData() {
+      try {
+        if (!window.db) throw new Error('Database not initialized');
+        
+        await window.db.del('config');
+        log('✓ Deleted config data', 'success');
+      } catch (error) {
+        log('✗ Error: ' + error.message, 'error');
+      }
+    }
+
+    async function addUser() {
+      try {
+        if (!window.db) throw new Error('Database not initialized');
+        
+        const name = document.getElementById('userName').value;
+        const email = document.getElementById('userEmail').value;
+        
+        if (!name || !email) {
+          throw new Error('Please enter both name and email');
+        }
+        
+        const path = await window.db.add('users', {
+          name,
+          email,
+          createdAt: new Date().toISOString()
+        });
+        
+        log(`✓ User added with ID: ${path[1]}`, 'success');
+        
+        // Clear inputs
+        document.getElementById('userName').value = '';
+        document.getElementById('userEmail').value = '';
+      } catch (error) {
+        log('✗ Error: ' + error.message, 'error');
+      }
+    }
+
+    async function listUsers() {
+      try {
+        if (!window.db) throw new Error('Database not initialized');
+        
+        const users = await window.db.get('users');
+        
+        if (!users || Object.keys(users).length === 0) {
+          log('No users found', 'info');
+          return;
+        }
+        
+        log('✓ Users:', 'success');
+        for (const [id, user] of Object.entries(users)) {
+          log(`  - ${id}: ${user.name} (${user.email})`, 'info');
+        }
+      } catch (error) {
+        log('✗ Error: ' + error.message, 'error');
+      }
+    }
+
+    async function incrementCounter() {
+      try {
+        if (!window.db) throw new Error('Database not initialized');
+        
+        await window.db.inc('counter', 1);
+        const value = await window.db.get('counter');
+        log(`✓ Counter incremented to: ${value}`, 'success');
+      } catch (error) {
+        log('✗ Error: ' + error.message, 'error');
+      }
+    }
+
+    async function decrementCounter() {
+      try {
+        if (!window.db) throw new Error('Database not initialized');
+        
+        await window.db.dec('counter', 1);
+        const value = await window.db.get('counter');
+        log(`✓ Counter decremented to: ${value}`, 'success');
+      } catch (error) {
+        log('✗ Error: ' + error.message, 'error');
+      }
+    }
+
+    async function getCounter() {
+      try {
+        if (!window.db) throw new Error('Database not initialized');
+        
+        const value = await window.db.get('counter');
+        log(`✓ Counter value: ${value}`, 'success');
+      } catch (error) {
+        log('✗ Error: ' + error.message, 'error');
+      }
+    }
+
+    async function resetCounter() {
+      try {
+        if (!window.db) throw new Error('Database not initialized');
+        
+        await window.db.set('counter', 0);
+        log('✓ Counter reset to 0', 'success');
+      } catch (error) {
+        log('✗ Error: ' + error.message, 'error');
+      }
+    }
+
+    async function testConcurrency() {
+      try {
+        if (!window.db) throw new Error('Database not initialized');
+        
+        log('Testing 100 concurrent increments...', 'info');
+        await window.db.set('concurrentTest', 0);
+        
+        const start = Date.now();
+        await Promise.all(
+          Array.from({ length: 100 }, () => window.db.inc('concurrentTest', 1))
+        );
+        const duration = Date.now() - start;
+        
+        const value = await window.db.get('concurrentTest');
+        
+        if (value === 100) {
+          log(`✓ Concurrency test passed! Value: ${value} (${duration}ms)`, 'success');
+        } else {
+          log(`✗ Concurrency test failed! Expected 100, got ${value}`, 'error');
+        }
+      } catch (error) {
+        log('✗ Error: ' + error.message, 'error');
+      }
+    }
+
+    async function clearDatabase() {
+      try {
+        if (!confirm('Are you sure you want to clear the database?')) {
+          return;
+        }
+        
+        if (window.db) {
+          await window.db.disconnect();
+          window.db = null;
+        }
+        
+        const request = indexedDB.deleteDatabase('example-app');
+        
+        request.onsuccess = () => {
+          log('✓ Database cleared successfully', 'success');
+        };
+        
+        request.onerror = () => {
+          log('✗ Failed to clear database', 'error');
+        };
+      } catch (error) {
+        log('✗ Error: ' + error.message, 'error');
+      }
+    }
+
+    // Auto-initialize on load
+    window.addEventListener('load', () => {
+      const tryAutoInit = () => {
+        if (window.modulesLoaded) {
+          log('Welcome! Click "Initialize Database" to start.', 'info');
+          log('Or try the auto-init:', 'info');
+          initDB();
+        } else {
+          // Modules not loaded yet, set a callback
+          window.modulesLoadedCallback = () => {
+            log('Welcome! Click "Initialize Database" to start.', 'info');
+            log('Or try the auto-init:', 'info');
+            initDB();
+          };
+        }
+      };
+      
+      setTimeout(tryAutoInit, 100);
+    });
+  </script>
+</body>
+</html>
+

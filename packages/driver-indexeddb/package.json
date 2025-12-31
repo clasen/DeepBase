@@ -1,0 +1,44 @@
+{
+  "name": "deepbase-indexeddb",
+  "version": "3.2.0",
+  "description": "⚡ DeepBase IndexedDB - browser storage driver",
+  "type": "module",
+  "main": "src/index.cjs",
+  "module": "src/index.js",
+  "exports": {
+    ".": {
+      "require": "./src/index.cjs",
+      "import": "./src/index.js"
+    }
+  },
+  "dependencies": {},
+  "peerDependencies": {
+    "deepbase": "^3.2.0"
+  },
+  "scripts": {
+    "test": "echo \"IndexedDB tests require browser environment. See test/test.html\""
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/clasen/DeepBase.git"
+  },
+  "keywords": [
+    "deepbase",
+    "indexeddb",
+    "browser",
+    "driver",
+    "database",
+    "persist",
+    "nested",
+    "objects",
+    "offline",
+    "pwa"
+  ],
+  "author": "Martin Clasen",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/clasen/DeepBase/issues"
+  },
+  "homepage": "https://github.com/clasen/DeepBase/tree/main/packages/driver-indexeddb"
+}
+

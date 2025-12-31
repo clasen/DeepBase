@@ -425,5 +425,193 @@ describe('DeepBase Core', function() {
       }
     });
   });
+
+  describe('Array Operations', function() {
+    it('should pop last element from array', async function() {
+      const driver = new MockDriver();
+      const db = new DeepBase([driver]);
+      
+      await db.set('items', ['a', 'b', 'c', 'd']);
+      
+      const popped = await db.pop('items');
+      assert.strictEqual(popped, 'd');
+      
+      const remaining = await db.get('items');
+      assert.strictEqual(remaining['0'], 'a');
+      assert.strictEqual(remaining['1'], 'b');
+      assert.strictEqual(remaining['2'], 'c');
+      assert.strictEqual(remaining['3'], undefined);
+    });
+
+    it('should shift first element from array', async function() {
+      const driver = new MockDriver();
+      const db = new DeepBase([driver]);
+      
+      await db.set('items', ['a', 'b', 'c', 'd']);
+      
+      const shifted = await db.shift('items');
+      assert.strictEqual(shifted, 'a');
+      
+      const remaining = await db.get('items');
+      assert.strictEqual(remaining['0'], undefined);
+      assert.strictEqual(remaining['1'], 'b');
+      assert.strictEqual(remaining['2'], 'c');
+      assert.strictEqual(remaining['3'], 'd');
+    });
+
+    it('should return undefined when popping from empty array', async function() {
+      const driver = new MockDriver();
+      const db = new DeepBase([driver]);
+      
+      await db.set('items', []);
+      const result = await db.pop('items');
+      assert.strictEqual(result, undefined);
+    });
+
+    it('should return undefined when shifting from empty array', async function() {
+      const driver = new MockDriver();
+      const db = new DeepBase([driver]);
+      
+      await db.set('items', []);
+      const result = await db.shift('items');
+      assert.strictEqual(result, undefined);
+    });
+
+    it('should pop from nested array', async function() {
+      const driver = new MockDriver();
+      const db = new DeepBase([driver]);
+      
+      await db.set('data', {
+        queue: ['task1', 'task2', 'task3']
+      });
+      
+      const popped = await db.pop('data', 'queue');
+      assert.strictEqual(popped, 'task3');
+      
+      const queue = await db.get('data', 'queue');
+      assert.strictEqual(queue['0'], 'task1');
+      assert.strictEqual(queue['1'], 'task2');
+      assert.strictEqual(queue['2'], undefined);
+    });
+
+    it('should shift from nested array', async function() {
+      const driver = new MockDriver();
+      const db = new DeepBase([driver]);
+      
+      await db.set('data', {
+        queue: ['task1', 'task2', 'task3']
+      });
+      
+      const shifted = await db.shift('data', 'queue');
+      assert.strictEqual(shifted, 'task1');
+      
+      const queue = await db.get('data', 'queue');
+      assert.strictEqual(queue['0'], undefined);
+      assert.strictEqual(queue['1'], 'task2');
+      assert.strictEqual(queue['2'], 'task3');
+    });
+
+    it('should handle multiple pops', async function() {
+      const driver = new MockDriver();
+      const db = new DeepBase([driver]);
+      
+      await db.set('stack', ['one', 'two', 'three']);
+      
+      assert.strictEqual(await db.pop('stack'), 'three');
+      assert.strictEqual(await db.pop('stack'), 'two');
+      assert.strictEqual(await db.pop('stack'), 'one');
+      assert.strictEqual(await db.pop('stack'), undefined);
+    });
+
+    it('should handle multiple shifts', async function() {
+      const driver = new MockDriver();
+      const db = new DeepBase([driver]);
+      
+      await db.set('queue', ['first', 'second', 'third']);
+      
+      assert.strictEqual(await db.shift('queue'), 'first');
+      assert.strictEqual(await db.shift('queue'), 'second');
+      assert.strictEqual(await db.shift('queue'), 'third');
+      assert.strictEqual(await db.shift('queue'), undefined);
+    });
+
+    it('should pop after add operations', async function() {
+      const driver = new MockDriver();
+      const db = new DeepBase([driver]);
+      
+      // Add 5 items
+      await db.add('items', 1);
+      await db.add('items', 2);
+      await db.add('items', 3);
+      await db.add('items', 4);
+      await db.add('items', 5);
+      
+      // Check initial values
+      let values = await db.values('items');
+      assert.strictEqual(values.length, 5);
+      assert.deepStrictEqual(values, [1, 2, 3, 4, 5]);
+      
+      // Pop last item
+      const popped = await db.pop('items');
+      assert.strictEqual(popped, 5);
+      
+      // Check remaining values
+      values = await db.values('items');
+      assert.strictEqual(values.length, 4);
+      assert.deepStrictEqual(values, [1, 2, 3, 4]);
+    });
+
+    it('should shift after add operations', async function() {
+      const driver = new MockDriver();
+      const db = new DeepBase([driver]);
+      
+      // Add 5 items
+      await db.add('items', 1);
+      await db.add('items', 2);
+      await db.add('items', 3);
+      await db.add('items', 4);
+      await db.add('items', 5);
+      
+      // Check initial values
+      let values = await db.values('items');
+      assert.strictEqual(values.length, 5);
+      assert.deepStrictEqual(values, [1, 2, 3, 4, 5]);
+      
+      // Shift first item
+      const shifted = await db.shift('items');
+      assert.strictEqual(shifted, 1);
+      
+      // Check remaining values
+      values = await db.values('items');
+      assert.strictEqual(values.length, 4);
+      assert.deepStrictEqual(values, [2, 3, 4, 5]);
+    });
+
+    it('should pop and shift together after add operations', async function() {
+      const driver = new MockDriver();
+      const db = new DeepBase([driver]);
+      
+      // Add 5 items
+      await db.add('items', 1);
+      await db.add('items', 2);
+      await db.add('items', 3);
+      await db.add('items', 4);
+      await db.add('items', 5);
+      
+      // Pop from end
+      const popped = await db.pop('items');
+      assert.strictEqual(popped, 5);
+      
+      let values = await db.values('items');
+      assert.deepStrictEqual(values, [1, 2, 3, 4]);
+      
+      // Shift from beginning
+      const shifted = await db.shift('items');
+      assert.strictEqual(shifted, 1);
+      
+      values = await db.values('items');
+      assert.deepStrictEqual(values, [2, 3, 4]);
+    });
+  });
 });
 

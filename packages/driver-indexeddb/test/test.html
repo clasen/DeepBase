@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DeepBase IndexedDB Driver - Tests</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 20px;
+      background: #f5f5f5;
+    }
+    h1 {
+      color: #333;
+      border-bottom: 3px solid #4CAF50;
+      padding-bottom: 10px;
+    }
+    .test {
+      background: white;
+      margin: 10px 0;
+      padding: 15px;
+      border-radius: 5px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    .test.running {
+      background: #fff9c4;
+      border-left: 4px solid #FFC107;
+    }
+    .test.passed {
+      background: #e8f5e9;
+      border-left: 4px solid #4CAF50;
+    }
+    .test.failed {
+      background: #ffebee;
+      border-left: 4px solid #f44336;
+    }
+    .test-name {
+      font-weight: bold;
+      margin-bottom: 5px;
+    }
+    .test-result {
+      font-family: 'Courier New', monospace;
+      font-size: 12px;
+      color: #666;
+      margin-top: 5px;
+    }
+    .summary {
+      background: #333;
+      color: white;
+      padding: 20px;
+      border-radius: 5px;
+      margin-top: 20px;
+      font-size: 18px;
+    }
+    .summary.success {
+      background: #4CAF50;
+    }
+    .summary.failure {
+      background: #f44336;
+    }
+    .error {
+      color: #f44336;
+      font-family: 'Courier New', monospace;
+      font-size: 12px;
+      margin-top: 5px;
+      white-space: pre-wrap;
+    }
+    button {
+      background: #4CAF50;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      font-size: 16px;
+      border-radius: 5px;
+      cursor: pointer;
+      margin: 10px 5px;
+    }
+    button:hover {
+      background: #45a049;
+    }
+    button.danger {
+      background: #f44336;
+    }
+    button.danger:hover {
+      background: #da190b;
+    }
+  </style>
+</head>
+<body>
+  <h1>🧪 DeepBase IndexedDB Driver - Test Suite</h1>
+  
+  <div>
+    <button onclick="runTests()">Run All Tests</button>
+    <button onclick="clearDatabase()" class="danger">Clear Database</button>
+  </div>
+  
+  <div id="tests"></div>
+  <div id="summary"></div>
+
+  <script type="module">
+    // Import DeepBase (now works in browser without bundler thanks to dynamic imports!)
+    import DeepBase from '../../core/src/index.js';
+    import { IndexedDBDriver } from '../src/IndexedDBDriver.js';
+    
+    // Make available globally
+    window.DeepBase = DeepBase;
+    window.IndexedDBDriver = IndexedDBDriver;
+    
+    console.log('Modules loaded successfully');
+  </script>
+
+  <script>
+    let testResults = [];
+    let db;
+
+    async function clearDatabase() {
+      if (confirm('Are you sure you want to clear the test database?')) {
+        try {
+          if (db) {
+            await db.disconnect();
+          }
+          
+          // Delete the database
+          const request = indexedDB.deleteDatabase('deepbase-test');
+          
+          request.onsuccess = () => {
+            alert('Database cleared successfully');
+            document.getElementById('tests').innerHTML = '';
+            document.getElementById('summary').innerHTML = '';
+            testResults = [];
+          };
+          
+          request.onerror = () => {
+            alert('Failed to clear database');
+          };
+        } catch (error) {
+          alert('Error: ' + error.message);
+        }
+      }
+    }
+
+    async function runTests() {
+      testResults = [];
+      document.getElementById('tests').innerHTML = '';
+      document.getElementById('summary').innerHTML = '';
+
+      const tests = [
+        { name: 'Initialize database', fn: testInit },
+        { name: 'Set and get simple value', fn: testSetGet },
+        { name: 'Set and get nested value', fn: testNestedSetGet },
+        { name: 'Delete value', fn: testDelete },
+        { name: 'Increment number', fn: testIncrement },
+        { name: 'Decrement number', fn: testDecrement },
+        { name: 'Add with auto-generated ID', fn: testAdd },
+        { name: 'Update with function', fn: testUpdate },
+        { name: 'Get keys', fn: testKeys },
+        { name: 'Get values', fn: testValues },
+        { name: 'Get entries', fn: testEntries },
+        { name: 'Pop from array', fn: testPop },
+        { name: 'Shift from array', fn: testShift },
+        { name: 'Concurrent operations', fn: testConcurrency },
+        { name: 'Complex nested objects', fn: testComplexObjects },
+        { name: 'Disconnect', fn: testDisconnect }
+      ];
+
+      for (const test of tests) {
+        await runTest(test.name, test.fn);
+      }
+
+      displaySummary();
+    }
+
+    async function runTest(name, fn) {
+      const testDiv = document.createElement('div');
+      testDiv.className = 'test running';
+      testDiv.innerHTML = `
+        <div class="test-name">${name}</div>
+        <div class="test-result">Running...</div>
+      `;
+      document.getElementById('tests').appendChild(testDiv);
+
+      try {
+        const result = await fn();
+        testDiv.className = 'test passed';
+        testDiv.innerHTML = `
+          <div class="test-name">✓ ${name}</div>
+          <div class="test-result">${result || 'Passed'}</div>
+        `;
+        testResults.push({ name, passed: true });
+      } catch (error) {
+        testDiv.className = 'test failed';
+        testDiv.innerHTML = `
+          <div class="test-name">✗ ${name}</div>
+          <div class="error">${error.message}\n${error.stack}</div>
+        `;
+        testResults.push({ name, passed: false, error: error.message });
+      }
+    }
+
+    function displaySummary() {
+      const passed = testResults.filter(r => r.passed).length;
+      const total = testResults.length;
+      const summaryDiv = document.getElementById('summary');
+      summaryDiv.className = passed === total ? 'summary success' : 'summary failure';
+      summaryDiv.innerHTML = `
+        <strong>Test Results:</strong> ${passed}/${total} passed
+        ${passed < total ? '<br><br>Some tests failed. See details above.' : '<br><br>All tests passed! 🎉'}
+      `;
+    }
+
+    async function testInit() {
+      db = new window.DeepBase(new window.IndexedDBDriver({
+        name: 'deepbase-test',
+        version: 1
+      }));
+      await db.connect();
+      return 'Database initialized';
+    }
+
+    async function testSetGet() {
+      await db.set('test', 'value', 'hello');
+      const value = await db.get('test', 'value');
+      if (value !== 'hello') throw new Error(`Expected 'hello', got '${value}'`);
+      return `Value: ${value}`;
+    }
+
+    async function testNestedSetGet() {
+      await db.set('users', 'alice', { name: 'Alice', age: 30 });
+      const user = await db.get('users', 'alice');
+      if (user.name !== 'Alice' || user.age !== 30) {
+        throw new Error(`Unexpected user data: ${JSON.stringify(user)}`);
+      }
+      return `User: ${JSON.stringify(user)}`;
+    }
+
+    async function testDelete() {
+      await db.set('temp', 'data', 'delete me');
+      await db.del('temp', 'data');
+      const value = await db.get('temp', 'data');
+      if (value !== null) throw new Error(`Expected null, got '${value}'`);
+      return 'Value deleted successfully';
+    }
+
+    async function testIncrement() {
+      await db.set('counter', 10);
+      await db.inc('counter', 5);
+      const value = await db.get('counter');
+      if (value !== 15) throw new Error(`Expected 15, got ${value}`);
+      return `Counter: ${value}`;
+    }
+
+    async function testDecrement() {
+      await db.set('counter', 20);
+      await db.dec('counter', 7);
+      const value = await db.get('counter');
+      if (value !== 13) throw new Error(`Expected 13, got ${value}`);
+      return `Counter: ${value}`;
+    }
+
+    async function testAdd() {
+      const path = await db.add('items', { name: 'Item 1', price: 99 });
+      if (path.length !== 2 || path[0] !== 'items') {
+        throw new Error(`Unexpected path: ${JSON.stringify(path)}`);
+      }
+      const item = await db.get(...path);
+      if (item.name !== 'Item 1') throw new Error('Item not found');
+      return `Added item with ID: ${path[1]}`;
+    }
+
+    async function testUpdate() {
+      await db.set('user', 'name', 'john');
+      await db.upd('user', 'name', name => name.toUpperCase());
+      const value = await db.get('user', 'name');
+      if (value !== 'JOHN') throw new Error(`Expected 'JOHN', got '${value}'`);
+      return `Updated name: ${value}`;
+    }
+
+    async function testKeys() {
+      await db.set('products', 'laptop', { price: 999 });
+      await db.set('products', 'mouse', { price: 29 });
+      const keys = await db.keys('products');
+      if (!keys.includes('laptop') || !keys.includes('mouse')) {
+        throw new Error(`Unexpected keys: ${JSON.stringify(keys)}`);
+      }
+      return `Keys: ${JSON.stringify(keys)}`;
+    }
+
+    async function testValues() {
+      await db.set('products', 'laptop', { price: 999 });
+      await db.set('products', 'mouse', { price: 29 });
+      const values = await db.values('products');
+      if (values.length !== 2) throw new Error('Expected 2 values');
+      return `Values: ${JSON.stringify(values)}`;
+    }
+
+    async function testEntries() {
+      await db.set('products', 'laptop', { price: 999 });
+      await db.set('products', 'mouse', { price: 29 });
+      const entries = await db.entries('products');
+      if (entries.length !== 2) throw new Error('Expected 2 entries');
+      return `Entries: ${JSON.stringify(entries)}`;
+    }
+
+    async function testPop() {
+      await db.set('myArray', [1, 2, 3, 4, 5]);
+      const popped = await db.pop('myArray');
+      if (popped !== 5) throw new Error(`Expected 5, got ${popped}`);
+      const arr = await db.get('myArray');
+      if (arr.length !== 4) throw new Error(`Expected length 4, got ${arr.length}`);
+      return `Popped: ${popped}, Array: ${JSON.stringify(arr)}`;
+    }
+
+    async function testShift() {
+      await db.set('myArray', [1, 2, 3, 4, 5]);
+      const shifted = await db.shift('myArray');
+      if (shifted !== 1) throw new Error(`Expected 1, got ${shifted}`);
+      const arr = await db.get('myArray');
+      if (arr.length !== 4) throw new Error(`Expected length 4, got ${arr.length}`);
+      return `Shifted: ${shifted}, Array: ${JSON.stringify(arr)}`;
+    }
+
+    async function testConcurrency() {
+      await db.set('concurrentCounter', 0);
+      
+      // Run 10 increments concurrently
+      await Promise.all(
+        Array.from({ length: 10 }, () => db.inc('concurrentCounter', 1))
+      );
+      
+      const value = await db.get('concurrentCounter');
+      if (value !== 10) throw new Error(`Expected 10, got ${value} - race condition detected!`);
+      return `Counter after 10 concurrent increments: ${value}`;
+    }
+
+    async function testComplexObjects() {
+      const complexObj = {
+        user: {
+          id: 123,
+          profile: {
+            name: 'Alice',
+            email: 'alice@example.com',
+            settings: {
+              theme: 'dark',
+              notifications: {
+                email: true,
+                push: false
+              }
+            }
+          },
+          posts: [
+            { id: 1, title: 'First Post', tags: ['intro', 'hello'] },
+            { id: 2, title: 'Second Post', tags: ['update'] }
+          ]
+        }
+      };
+      
+      await db.set('complex', complexObj);
+      const retrieved = await db.get('complex');
+      
+      if (JSON.stringify(retrieved) !== JSON.stringify(complexObj)) {
+        throw new Error('Complex object not preserved correctly');
+      }
+      
+      return `Complex object stored and retrieved successfully`;
+    }
+
+    async function testDisconnect() {
+      await db.disconnect();
+      return 'Database disconnected';
+    }
+
+    // Auto-run tests when page loads
+    window.addEventListener('load', () => {
+      console.log('Page loaded, waiting 1 second before running tests...');
+      setTimeout(runTests, 1000);
+    });
+  </script>
+</body>
+</html>
+

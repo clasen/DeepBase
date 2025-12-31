@@ -46,6 +46,14 @@ export class DeepBaseDriver {
     throw new Error('upd() must be implemented by driver');
   }
   
+  async pop(...args) {
+    throw new Error('pop() must be implemented by driver');
+  }
+  
+  async shift(...args) {
+    throw new Error('shift() must be implemented by driver');
+  }
+  
   async keys(...args) {
     const r = await this.get(...args);
     return (r !== null && typeof r === "object") ? Object.keys(r) : [];
