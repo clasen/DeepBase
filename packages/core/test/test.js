@@ -111,9 +111,11 @@ describe('DeepBase Core', function() {
       assert.strictEqual(db.drivers[1], driver2);
     });
 
-    it('should create JsonDriver for plain object (backward compatibility)', function() {
+    it('should create JsonDriver for plain object (backward compatibility)', async function() {
       // When a plain object is passed, it should create a JsonDriver with those options
       const db = new DeepBase({ name: 'test-db' });
+      // Drivers are initialized lazily, so we need to initialize them first
+      await db._initializeDrivers();
       assert.strictEqual(db.drivers.length, 1);
       assert.ok(db.drivers[0] instanceof DeepBaseDriver);
     });
