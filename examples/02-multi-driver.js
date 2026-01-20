@@ -1,5 +1,6 @@
 // Example 2: Multi-driver with MongoDB primary and JSON backup
-import DeepBase, { JsonDriver } from '../packages/core/src/index.js';
+import DeepBase from '../packages/core/src/index.js';
+import JsonDriver from '../packages/driver-json/src/index.js';
 import MongoDriver from '../packages/driver-mongodb/src/index.js'; // deepbase-mongodb
 
 async function main() {

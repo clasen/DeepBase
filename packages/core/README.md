@@ -51,9 +51,10 @@ const alice = await db.get('users', 'alice');
 
 The JSON driver (`deepbase-json`) is included automatically. Install additional drivers as needed:
 
-- `deepbase-sqlite` - SQLite embedded database
-- `deepbase-mongodb` - MongoDB storage
-- `deepbase-redis` - Redis Stack storage
+- [`deepbase-sqlite`](https://www.npmjs.com/package/deepbase-sqlite) - SQLite embedded database
+- [`deepbase-mongodb`](https://www.npmjs.com/package/deepbase-mongodb) - MongoDB storage
+- [`deepbase-redis`](https://www.npmjs.com/package/deepbase-redis) - Redis Stack storage
+- [`deepbase-indexeddb`](https://www.npmjs.com/package/deepbase-indexeddb) - IndexedDB for browser environments
 
 ### Multi-Driver Example
 

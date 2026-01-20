@@ -10,7 +10,7 @@ export class SqliteDriver extends DeepBaseDriver {
     super(opts);
     
     this.name = name || "default";
-    this.path = path || './db';
+    this.path = path || new URL('../../db', import.meta.url).pathname;
     
     this.path = pathModule.resolve(this.path);
     this.fileName = pathModule.join(this.path, `${this.name}.db`);

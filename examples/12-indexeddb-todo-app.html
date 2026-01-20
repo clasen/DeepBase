@@ -1,63 +1,62 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>DeepBase IndexedDB - Todo App</title>
-  
-  <!-- Import map to resolve bare module specifiers in browser -->
-  <script type="importmap">
-    {
-      "imports": {
-        "deepbase": "../packages/core/src/index.js",
-        "nanoid": "https://cdn.jsdelivr.net/npm/nanoid@5.1.5/index.browser.js"
-      }
-    }
-  </script>
-  
+
   <style>
     * {
       margin: 0;
       padding: 0;
       box-sizing: border-box;
     }
+
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
       background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
       min-height: 100vh;
       padding: 20px;
     }
+
     .app {
       max-width: 600px;
       margin: 0 auto;
       background: white;
       border-radius: 10px;
-      box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
       overflow: hidden;
     }
+
     .header {
       background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
       color: white;
       padding: 30px;
       text-align: center;
     }
+
     .header h1 {
       font-size: 32px;
       margin-bottom: 10px;
     }
+
     .header p {
       opacity: 0.9;
       font-size: 14px;
     }
+
     .input-section {
       padding: 20px;
       background: #f8f9fa;
       border-bottom: 1px solid #e9ecef;
     }
+
     .input-group {
       display: flex;
       gap: 10px;
     }
+
     .input-group input {
       flex: 1;
       padding: 12px 16px;
@@ -66,10 +65,12 @@
       font-size: 16px;
       transition: border-color 0.3s;
     }
+
     .input-group input:focus {
       outline: none;
       border-color: #667eea;
     }
+
     .input-group button {
       padding: 12px 24px;
       background: #667eea;
@@ -81,9 +82,11 @@
       cursor: pointer;
       transition: background 0.3s;
     }
+
     .input-group button:hover {
       background: #5568d3;
     }
+
     .stats {
       padding: 15px 20px;
       background: #fff;
@@ -93,11 +96,13 @@
       font-size: 14px;
       color: #6c757d;
     }
+
     .todos {
       padding: 20px;
       max-height: 400px;
       overflow-y: auto;
     }
+
     .todo-item {
       background: #f8f9fa;
       padding: 15px;
@@ -109,35 +114,43 @@
       transition: all 0.3s;
       animation: slideIn 0.3s;
     }
+
     @keyframes slideIn {
       from {
         opacity: 0;
         transform: translateY(-10px);
       }
+
       to {
         opacity: 1;
         transform: translateY(0);
       }
     }
+
     .todo-item:hover {
       background: #e9ecef;
     }
+
     .todo-item.completed {
       opacity: 0.6;
     }
+
     .todo-item.completed .todo-text {
       text-decoration: line-through;
       color: #6c757d;
     }
+
     .todo-checkbox {
       width: 20px;
       height: 20px;
       cursor: pointer;
     }
+
     .todo-text {
       flex: 1;
       font-size: 16px;
     }
+
     .todo-delete {
       background: #dc3545;
       color: white;
@@ -148,26 +161,31 @@
       font-size: 14px;
       transition: background 0.3s;
     }
+
     .todo-delete:hover {
       background: #c82333;
     }
+
     .empty-state {
       text-align: center;
       padding: 40px;
       color: #6c757d;
     }
+
     .empty-state svg {
       width: 64px;
       height: 64px;
       margin-bottom: 16px;
       opacity: 0.5;
     }
+
     .footer {
       padding: 15px 20px;
       background: #f8f9fa;
       border-top: 1px solid #e9ecef;
       text-align: center;
     }
+
     .footer button {
       background: #dc3545;
       color: white;
@@ -177,9 +195,11 @@
       cursor: pointer;
       font-size: 14px;
     }
+
     .footer button:hover {
       background: #c82333;
     }
+
     .loading {
       text-align: center;
       padding: 40px;
@@ -187,34 +207,31 @@
     }
   </style>
 </head>
+
 <body>
   <div class="app">
     <div class="header">
       <h1>📝 Todo App</h1>
       <p>Powered by DeepBase + IndexedDB</p>
     </div>
-    
+
     <div class="input-section">
       <div class="input-group">
-        <input 
-          type="text" 
-          id="todoInput" 
-          placeholder="What needs to be done?" 
-          onkeypress="if(event.key === 'Enter') addTodo()"
-        />
+        <input type="text" id="todoInput" placeholder="What needs to be done?"
+          onkeypress="if(event.key === 'Enter') addTodo()" />
         <button onclick="addTodo()">Add</button>
       </div>
     </div>
-    
+
     <div class="stats">
       <span id="totalCount">Total: 0</span>
       <span id="completedCount">Completed: 0</span>
     </div>
-    
+
     <div class="todos" id="todoList">
       <div class="loading">Loading...</div>
     </div>
-    
+
     <div class="footer">
       <button onclick="clearCompleted()">Clear Completed</button>
       <button onclick="clearAll()">Clear All</button>
@@ -222,16 +239,13 @@
   </div>
 
   <script type="module">
+    import DeepBase from 'https://cdn.skypack.dev/deepbase';
+    import IndexedDBDriver from 'https://cdn.skypack.dev/deepbase-indexeddb';
+
     try {
-      // Import DeepBase (now works in browser without bundler thanks to import maps!)
-      const DeepBaseModule = await import('../packages/core/src/index.js');
-      const IndexedDBModule = await import('../packages/driver-indexeddb/src/index.js');
-      
-      const DeepBase = DeepBaseModule.default;
-      const IndexedDBDriver = IndexedDBModule.IndexedDBDriver;
-      
+      // Your code here
       console.log('✓ Modules loaded successfully');
-      
+
       // Initialize app
       class TodoApp {
         constructor() {
@@ -240,19 +254,19 @@
             version: 1
           }));
         }
-        
+
         async init() {
-          await this.db.connect();
-          
+          //await this.db.connect();
+
           // Initialize todos if not exists
           const todos = await this.db.get('todos');
           if (!todos) {
             await this.db.set('todos', {});
           }
-          
+
           await this.render();
         }
-        
+
         async addTodo(text) {
           const path = await this.db.add('todos', {
             text,
@@ -262,21 +276,21 @@
           await this.render();
           return path[1];
         }
-        
+
         async toggleTodo(id) {
           await this.db.upd('todos', id, 'completed', val => !val);
           await this.render();
         }
-        
+
         async deleteTodo(id) {
           await this.db.del('todos', id);
           await this.render();
         }
-        
+
         async getTodos() {
           return await this.db.get('todos') || {};
         }
-        
+
         async clearCompleted() {
           const todos = await this.getTodos();
           for (const [id, todo] of Object.entries(todos)) {
@@ -286,20 +300,20 @@
           }
           await this.render();
         }
-        
+
         async clearAll() {
           if (confirm('Are you sure you want to delete all todos?')) {
             await this.db.set('todos', {});
             await this.render();
           }
         }
-        
+
         async render() {
           const todos = await this.getTodos();
           const entries = Object.entries(todos).sort((a, b) => b[1].createdAt - a[1].createdAt);
-          
+
           const todoList = document.getElementById('todoList');
-          
+
           if (entries.length === 0) {
             todoList.innerHTML = `
               <div class="empty-state">
@@ -324,22 +338,22 @@
               </div>
             `).join('');
           }
-          
+
           // Update stats
           const total = entries.length;
           const completed = entries.filter(([, todo]) => todo.completed).length;
-          
+
           document.getElementById('totalCount').textContent = `Total: ${total}`;
           document.getElementById('completedCount').textContent = `Completed: ${completed}`;
         }
-        
+
         escapeHtml(text) {
           const div = document.createElement('div');
           div.textContent = text;
           return div.innerHTML;
         }
       }
-    
+
       // Initialize and make globally available
       window.app = new TodoApp();
       window.app.init().catch(err => {
@@ -365,25 +379,25 @@
     async function addTodo() {
       const input = document.getElementById('todoInput');
       const text = input.value.trim();
-      
+
       if (!text) {
         alert('Please enter a todo');
         return;
       }
-      
+
       await window.app.addTodo(text);
       input.value = '';
       input.focus();
     }
-    
+
     async function clearCompleted() {
       await window.app.clearCompleted();
     }
-    
+
     async function clearAll() {
       await window.app.clearAll();
     }
   </script>
 </body>
-</html>
 
+</html>
