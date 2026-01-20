@@ -1,6 +1,6 @@
 {
   "name": "deepbase",
-  "version": "3.4.0",
+  "version": "3.4.2",
   "description": "⚡ DeepBase - Fastest and simplest way to add persistence to your projects.",
   "type": "module",
   "main": "src/index.cjs",
@@ -15,7 +15,7 @@
     "test": "mocha test/test.js"
   },
   "dependencies": {
-    "deepbase-json": "^3.4.0",
+    "deepbase-json": "^3.4.2",
     "nanoid": "^5.1.5"
   },
   "devDependencies": {
