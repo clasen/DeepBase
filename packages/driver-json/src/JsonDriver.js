@@ -10,7 +10,7 @@ export class JsonDriver extends DeepBaseDriver {
     super(opts);
     
     this.name = name || "default";
-    this.path = path || new URL('../../db', import.meta.url).pathname;
+    this.path = path || new URL('../../../db', import.meta.url).pathname;
     this.stringify = stringify || ((obj) => JSON.stringify(obj, null, 4));
     this.parse = parse || JSON.parse;
     
