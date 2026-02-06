@@ -9,6 +9,11 @@ npm install deepbase
 # Automatically includes deepbase-json as dependency
 ```
 
+> **AI Skill**: You can also add DeepBase as a skill for AI agentic development:
+> ```bash
+> npx skills add https://github.com/clasen/DeepBase --skill deepbase
+> ```
+
 ## What is DeepBase?
 
 DeepBase is a powerful database abstraction that orchestrates multiple storage drivers. It includes:
