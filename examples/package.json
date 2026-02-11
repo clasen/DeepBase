@@ -13,6 +13,7 @@
     "example6": "node 06-flatted.js"
   },
   "dependencies": {
+    "crypto-js": "^4.2.0",
     "flatted": "^3.3.3"
   }
 }

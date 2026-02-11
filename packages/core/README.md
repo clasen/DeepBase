@@ -182,6 +182,44 @@ class MyDriver extends DeepBaseDriver {
 }
 ```
 
+## 🔐 Extending DeepBase with Encryption
+
+DeepBase supports custom `stringify`/`parse` functions in its `JsonDriver`, making it easy to add transparent AES encryption:
+
+```javascript
+import CryptoJS from 'crypto-js';
+import DeepBase from 'deepbase';
+import { JsonDriver } from 'deepbase-json';
+
+class DeepbaseSecure extends DeepBase {
+    constructor(opts) {
+        const encryptionKey = opts.encryptionKey;
+        delete opts.encryptionKey;
+
+        const driver = new JsonDriver({
+            ...opts,
+            stringify: (obj) => {
+                const iv = CryptoJS.lib.WordArray.random(128 / 8);
+                const encrypted = CryptoJS.AES.encrypt(JSON.stringify(obj), encryptionKey, { iv });
+                return iv.toString(CryptoJS.enc.Hex) + ':' + encrypted.toString();
+            },
+            parse: (encryptedData) => {
+                const [ivHex, encrypted] = encryptedData.split(':');
+                const iv = CryptoJS.enc.Hex.parse(ivHex);
+                const bytes = CryptoJS.AES.decrypt(encrypted, encryptionKey, { iv });
+                return JSON.parse(bytes.toString(CryptoJS.enc.Utf8));
+            }
+        });
+
+        super(driver);
+    }
+}
+
+const db = new DeepbaseSecure({ name: 'secrets', encryptionKey: 'my-key-123' });
+await db.set('token', 'sk-super-secret');
+console.log(await db.get('token')); // 'sk-super-secret' (file on disk is encrypted)
+```
+
 ## License
 
 MIT - Copyright (c) Martin Clasen
