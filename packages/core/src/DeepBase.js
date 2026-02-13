@@ -397,20 +397,15 @@ export class DeepBase {
       ...opts
     };
     
-    console.log(`🔄 Starting migration from driver ${fromIndex} to driver ${toIndex}...`);
-    
     // Clear target if requested
     if (options.clear) {
-      console.log('🧹 Clearing target driver...');
       await targetDriver.del();
     }
     
     // Get all data from source
-    console.log('📥 Reading from source driver...');
     const sourceData = await sourceDriver.get();
     
     if (!sourceData || typeof sourceData !== 'object') {
-      console.log('✅ No data to migrate');
       return { migrated: 0, errors: 0 };
     }
     
@@ -447,8 +442,6 @@ export class DeepBase {
     
     await migrateObject(sourceData);
     
-    console.log(`✅ Migration complete: ${migrated} items migrated, ${errors} errors`);
-    
     return { migrated, errors };
   }
   
@@ -465,7 +458,6 @@ export class DeepBase {
     const results = [];
     
     for (let i = 1; i < this.drivers.length; i++) {
-      console.log(`\n🔄 Syncing to driver ${i}...`);
       const result = await this.migrate(0, i, opts);
       results.push({ driverIndex: i, ...result });
     }
