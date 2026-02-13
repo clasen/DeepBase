@@ -2,24 +2,29 @@ import { DeepBaseDriver } from 'deepbase';
 import steno from 'steno';
 import fs from 'fs';
 import * as pathModule from 'path';
+import lockfile from 'proper-lockfile';
 
 export class JsonDriver extends DeepBaseDriver {
   static _instances = {};
   
-  constructor({name, path, stringify, parse, ...opts} = {}) {
+  constructor({name, path, stringify, parse, multiProcess, ...opts} = {}) {
     super(opts);
     
     this.name = name || "default";
     this.path = path || new URL('../../../db', import.meta.url).pathname;
     this.stringify = stringify || ((obj) => JSON.stringify(obj, null, 4));
     this.parse = parse || JSON.parse;
+    this.multiProcess = multiProcess || false;
     
     this.path = pathModule.resolve(this.path);
     this.fileName = pathModule.join(this.path, `${this.name}.json`);
     
     // Singleton pattern per file
     if (JsonDriver._instances[this.fileName]) {
-      return JsonDriver._instances[this.fileName];
+      const existing = JsonDriver._instances[this.fileName];
+      // Upgrade to multiProcess if requested
+      if (multiProcess) existing.multiProcess = true;
+      return existing;
     }
     
     this.obj = {};
@@ -38,6 +43,9 @@ export class JsonDriver extends DeepBaseDriver {
     if (fs.existsSync(this.fileName)) {
       const fileContent = fs.readFileSync(this.fileName, "utf8");
       this.obj = fileContent ? this.parse(fileContent) : {};
+    } else {
+      // Create the file so proper-lockfile can lock it in multiProcess mode
+      fs.writeFileSync(this.fileName, this.stringify(this.obj));
     }
     
     this._connected = true;
@@ -48,7 +56,10 @@ export class JsonDriver extends DeepBaseDriver {
   }
   
   async get(...args) {
-    // Reads don't modify state, so they can run without queuing
+    // In multiProcess mode, re-read from disk for fresh data
+    if (this.multiProcess) {
+      this._refreshFromDisk();
+    }
     const value = this._getRecursive(this.obj, args.slice());
     return typeof value === 'object' && value !== null 
       ? this.parse(this.stringify(value)) 
@@ -136,6 +147,14 @@ export class JsonDriver extends DeepBaseDriver {
     return keys;
   }
   
+  // Re-read file from disk into this.obj
+  _refreshFromDisk() {
+    if (fs.existsSync(this.fileName)) {
+      const fileContent = fs.readFileSync(this.fileName, "utf8");
+      this.obj = fileContent ? this.parse(fileContent) : {};
+    }
+  }
+
   // Queue operations to prevent race conditions
   async _queueOperation(operation) {
     const previousOperation = this._operationQueue;
@@ -148,13 +167,28 @@ export class JsonDriver extends DeepBaseDriver {
     try {
       // Wait for previous operation to complete
       await previousOperation;
-      // Execute current operation
-      const result = await operation();
-      resolver();
-      return result;
+
+      if (this.multiProcess) {
+        // Lock the file, re-read, operate, then unlock
+        const release = await lockfile.lock(this.fileName, {
+          retries: { retries: 10, minTimeout: 50, maxTimeout: 500 },
+          stale: 10000
+        });
+        try {
+          this._refreshFromDisk();
+          const result = await operation();
+          return result;
+        } finally {
+          await release();
+        }
+      } else {
+        const result = await operation();
+        return result;
+      }
     } catch (error) {
-      resolver();
       throw error;
+    } finally {
+      resolver();
     }
   }
   
@@ -185,13 +219,18 @@ export class JsonDriver extends DeepBaseDriver {
   }
   
   async _saveToFile() {
-    return new Promise((resolve, reject) => {
-      const serializedData = this.stringify(this.obj);
-      steno.writeFile(this.fileName, serializedData, err => {
-        if (err) reject(err);
-        else resolve();
+    const serializedData = this.stringify(this.obj);
+    if (this.multiProcess) {
+      // Sync write ensures data is on disk before lock release
+      fs.writeFileSync(this.fileName, serializedData);
+    } else {
+      return new Promise((resolve, reject) => {
+        steno.writeFile(this.fileName, serializedData, err => {
+          if (err) reject(err);
+          else resolve();
+        });
       });
-    });
+    }
   }
 }
 

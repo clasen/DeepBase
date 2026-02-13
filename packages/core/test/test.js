@@ -428,6 +428,59 @@ describe('DeepBase Core', function() {
     });
   });
 
+  describe('Len', function() {
+    it('should return the number of keys in an object', async function() {
+      const driver = new MockDriver();
+      const db = new DeepBase([driver]);
+      
+      await db.set('users', 'alice', { age: 30 });
+      await db.set('users', 'bob', { age: 25 });
+      await db.set('users', 'charlie', { age: 35 });
+      
+      const count = await db.len('users');
+      assert.strictEqual(count, 3);
+    });
+
+    it('should return 0 for empty or non-existent paths', async function() {
+      const driver = new MockDriver();
+      const db = new DeepBase([driver]);
+      
+      const count = await db.len('nonexistent');
+      assert.strictEqual(count, 0);
+    });
+
+    it('should return 0 for scalar values', async function() {
+      const driver = new MockDriver();
+      const db = new DeepBase([driver]);
+      
+      await db.set('name', 'Alice');
+      const count = await db.len('name');
+      assert.strictEqual(count, 0);
+    });
+
+    it('should count top-level keys when called with no args', async function() {
+      const driver = new MockDriver();
+      const db = new DeepBase([driver]);
+      
+      await db.set('a', 1);
+      await db.set('b', 2);
+      await db.set('c', 3);
+      
+      const count = await db.len();
+      assert.strictEqual(count, 3);
+    });
+
+    it('should count nested keys', async function() {
+      const driver = new MockDriver();
+      const db = new DeepBase([driver]);
+      
+      await db.set('data', 'items', { x: 1, y: 2, z: 3, w: 4 });
+      
+      const count = await db.len('data', 'items');
+      assert.strictEqual(count, 4);
+    });
+  });
+
   describe('Array Operations', function() {
     it('should pop last element from array', async function() {
       const driver = new MockDriver();

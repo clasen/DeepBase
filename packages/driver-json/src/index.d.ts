@@ -5,6 +5,8 @@ export interface JsonDriverOptions extends DeepBaseDriverOptions {
     path?: string;
     stringify?: (obj: any) => string;
     parse?: (str: string) => any;
+    /** Enable cross-process file locking for safe multi-process access */
+    multiProcess?: boolean;
 }
 
 export class JsonDriver extends DeepBaseDriver {

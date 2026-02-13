@@ -146,8 +146,13 @@ new DeepBase(drivers, options)
 - `await db.del(...path)` - Delete value at path
 - `await db.inc(...path, amount)` - Increment value
 - `await db.dec(...path, amount)` - Decrement value
-- `await db.add(...path, value)` - Add with auto-generated ID
+- `await db.add(...path, value)` - Add with auto-generated ID (consistent across all drivers)
 - `await db.upd(...path, fn)` - Update with function
+
+#### Queue / Stack Operations
+- `await db.pop(...path)` - Remove and return the last item
+- `await db.shift(...path)` - Remove and return the first item
+- `await db.len(...path)` - Count the number of keys at path
 
 #### Query Operations
 - `await db.keys(...path)` - Get keys at path
@@ -161,6 +166,28 @@ new DeepBase(drivers, options)
 #### Driver Management
 - `db.getDriver(index)` - Get specific driver
 - `db.getDrivers()` - Get all drivers
+
+## Queue & Stack
+
+Use `add` + `shift` as a **FIFO queue**, or `add` + `pop` as a **LIFO stack**:
+
+```javascript
+// FIFO Queue
+await db.add('jobs', { task: 'send-email', to: 'alice@example.com' });
+await db.add('jobs', { task: 'resize-image', file: 'photo.jpg' });
+await db.add('jobs', { task: 'notify', channel: '#general' });
+
+const next = await db.shift('jobs'); // { task: 'send-email', ... }
+await db.len('jobs'); // 2
+
+// LIFO Stack
+await db.add('undo', { action: 'delete', id: 42 });
+await db.add('undo', { action: 'edit', id: 7 });
+
+const last = await db.pop('undo'); // { action: 'edit', id: 7 }
+```
+
+In multi-driver mode, `add` generates a single ID shared across all drivers, so `pop` and `shift` stay consistent regardless of the number of backends.
 
 ## Creating Custom Drivers
 

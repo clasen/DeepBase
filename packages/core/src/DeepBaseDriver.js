@@ -69,6 +69,11 @@ export class DeepBaseDriver {
     return (r !== null && typeof r === "object") ? Object.entries(r) : [];
   }
   
+  async len(...args) {
+    const k = await this.keys(...args);
+    return k.length;
+  }
+  
   /**
    * Escape special characters in a key component
    * Escapes backslashes first, then dots

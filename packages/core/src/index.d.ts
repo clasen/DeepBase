@@ -29,6 +29,7 @@ export class DeepBaseDriver {
     keys(...args: any[]): Promise<string[]>;
     values(...args: any[]): Promise<any[]>;
     entries(...args: any[]): Promise<[string, any][]>;
+    len(...args: any[]): Promise<number>;
 
     protected _escapeDots(str: string): string;
     protected _unescapeDots(str: string): string;
@@ -92,6 +93,7 @@ export class DeepBase {
     keys(...args: any[]): Promise<string[]>;
     values(...args: any[]): Promise<any[]>;
     entries(...args: any[]): Promise<[string, any][]>;
+    len(...args: any[]): Promise<number>;
 
     migrate(fromIndex?: number, toIndex?: number, opts?: MigrateOptions): Promise<MigrateResult>;
     syncAll(opts?: MigrateOptions): Promise<SyncResult[]>;

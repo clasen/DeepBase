@@ -273,19 +273,16 @@ export class DeepBase {
     await this._ensureConnected();
     
     const operation = async () => {
-      if (this.opts.writeAll) {
-        const results = await Promise.allSettled(
-          this.drivers.map(driver => driver.add(...args))
-        );
-        
-        if (this.opts.failOnPrimaryError && results[0].status === 'rejected') {
-          throw results[0].reason;
-        }
-        
-        return results[0].status === 'fulfilled' ? results[0].value : null;
-      } else {
-        return this.drivers[0].add(...args);
-      }
+      const value = args[args.length - 1];
+      const keys = args.slice(0, -1);
+      
+      // Generate ID once so all drivers share the same key
+      const id = this.drivers[0].nanoid();
+      
+      // Use set() which already handles writeAll
+      await this.set(...keys, id, value);
+      
+      return [...keys, id];
     };
     
     return withTimeout(operation(), this.opts.writeTimeout, 'add()');
@@ -366,6 +363,11 @@ export class DeepBase {
   async entries(...args) {
     const r = await this.get(...args);
     return (r !== null && typeof r === "object") ? Object.entries(r) : [];
+  }
+  
+  async len(...args) {
+    const k = await this.keys(...args);
+    return k.length;
   }
   
   /**

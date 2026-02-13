@@ -2,8 +2,10 @@ import assert from 'assert';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { fork } from 'child_process';
 import { DeepBase } from '../../core/src/index.js';
 import { JsonDriver } from '../src/JsonDriver.js';
+import { SqliteDriver } from '../../driver-sqlite/src/SqliteDriver.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const testDataPath = path.join(__dirname, 'test-data');
@@ -275,6 +277,98 @@ describe('JsonDriver', function() {
     });
   });
 
+  describe('Queue / Stack (add + pop + shift)', function() {
+    it('should work as FIFO queue with add + shift', async function() {
+      // Enqueue items
+      await db.add('queue', 'first');
+      await db.add('queue', 'second');
+      await db.add('queue', 'third');
+
+      // Dequeue in insertion order (FIFO)
+      assert.strictEqual(await db.shift('queue'), 'first');
+      assert.strictEqual(await db.shift('queue'), 'second');
+      assert.strictEqual(await db.shift('queue'), 'third');
+      assert.strictEqual(await db.shift('queue'), undefined);
+    });
+
+    it('should work as LIFO stack with add + pop', async function() {
+      // Push items
+      await db.add('stack', 'first');
+      await db.add('stack', 'second');
+      await db.add('stack', 'third');
+
+      // Pop in reverse order (LIFO)
+      assert.strictEqual(await db.pop('stack'), 'third');
+      assert.strictEqual(await db.pop('stack'), 'second');
+      assert.strictEqual(await db.pop('stack'), 'first');
+      assert.strictEqual(await db.pop('stack'), undefined);
+    });
+
+    it('should interleave add and shift correctly', async function() {
+      await db.add('q', 'a');
+      await db.add('q', 'b');
+      assert.strictEqual(await db.shift('q'), 'a');
+
+      await db.add('q', 'c');
+      assert.strictEqual(await db.shift('q'), 'b');
+      assert.strictEqual(await db.shift('q'), 'c');
+      assert.strictEqual(await db.shift('q'), undefined);
+    });
+
+    it('should interleave add and pop correctly', async function() {
+      await db.add('s', 'a');
+      await db.add('s', 'b');
+      assert.strictEqual(await db.pop('s'), 'b');
+
+      await db.add('s', 'c');
+      assert.strictEqual(await db.pop('s'), 'c');
+      assert.strictEqual(await db.pop('s'), 'a');
+      assert.strictEqual(await db.pop('s'), undefined);
+    });
+
+    it('should track length correctly through add/pop/shift', async function() {
+      await db.add('items', 1);
+      await db.add('items', 2);
+      await db.add('items', 3);
+      assert.strictEqual(await db.len('items'), 3);
+
+      await db.pop('items');
+      assert.strictEqual(await db.len('items'), 2);
+
+      await db.shift('items');
+      assert.strictEqual(await db.len('items'), 1);
+
+      await db.add('items', 4);
+      assert.strictEqual(await db.len('items'), 2);
+    });
+
+    it('should preserve values order with add + values()', async function() {
+      await db.add('list', 'x');
+      await db.add('list', 'y');
+      await db.add('list', 'z');
+
+      const vals = await db.values('list');
+      assert.deepStrictEqual(vals, ['x', 'y', 'z']);
+    });
+
+    it('should handle objects in queue', async function() {
+      await db.add('tasks', { task: 'build', priority: 1 });
+      await db.add('tasks', { task: 'test', priority: 2 });
+      await db.add('tasks', { task: 'deploy', priority: 3 });
+
+      const first = await db.shift('tasks');
+      assert.deepStrictEqual(first, { task: 'build', priority: 1 });
+
+      const last = await db.pop('tasks');
+      assert.deepStrictEqual(last, { task: 'deploy', priority: 3 });
+
+      assert.strictEqual(await db.len('tasks'), 1);
+    });
+
+    // Limitation: pop/shift are designed for object-based collections (via add()),
+    // not native JS arrays. delete arr[i] leaves a hole instead of shrinking the array.
+  });
+
   describe('Singleton Pattern', function() {
     it('should return same instance for same file', function() {
       const driver1 = new JsonDriver({ name: 'singleton', path: testDataPath });
@@ -386,6 +480,339 @@ describe('JsonDriver', function() {
       const result = await db.get('inventory');
       assert.strictEqual(result, 500, 'All decrements should be applied atomically');
     });
+  });
+
+  describe('Multi-Process Safety (multiProcess: true)', function() {
+    const workerPath = path.join(__dirname, 'worker.js');
+    const multiProcessPath = path.join(testDataPath, 'multi-process');
+
+    function spawnWorker(args) {
+      return new Promise((resolve, reject) => {
+        const child = fork(workerPath, [JSON.stringify(args)], {
+          stdio: 'pipe'
+        });
+        let stderr = '';
+        child.stderr.on('data', (data) => { stderr += data.toString(); });
+        child.on('exit', (code) => {
+          if (code === 0) resolve();
+          else reject(new Error(`Worker exited with code ${code}: ${stderr}`));
+        });
+        child.on('error', reject);
+      });
+    }
+
+    beforeEach(function() {
+      // Clean singleton cache so multiProcess instances are fresh
+      JsonDriver._instances = {};
+      if (fs.existsSync(multiProcessPath)) {
+        fs.rmSync(multiProcessPath, { recursive: true, force: true });
+      }
+    });
+
+    afterEach(function() {
+      JsonDriver._instances = {};
+      if (fs.existsSync(multiProcessPath)) {
+        fs.rmSync(multiProcessPath, { recursive: true, force: true });
+      }
+    });
+
+    it('should handle concurrent increments from multiple processes', async function() {
+      this.timeout(30000);
+      
+      const dbName = 'mp-inc-test';
+      const numProcesses = 4;
+      const iterationsPerProcess = 25;
+
+      // Initialize the file with counter = 0
+      const driver = new JsonDriver({ name: dbName, path: multiProcessPath, multiProcess: true });
+      await driver.connect();
+      await driver.set('counter', 0);
+      await driver.disconnect();
+      JsonDriver._instances = {};
+
+      // Spawn N processes that each increment counter M times
+      const workers = Array.from({ length: numProcesses }, () =>
+        spawnWorker({ name: dbName, path: multiProcessPath, task: 'increment', iterations: iterationsPerProcess })
+      );
+      await Promise.all(workers);
+
+      // Read the final value
+      const verifyDriver = new JsonDriver({ name: dbName, path: multiProcessPath, multiProcess: true });
+      await verifyDriver.connect();
+      const result = await verifyDriver.get('counter');
+      await verifyDriver.disconnect();
+      JsonDriver._instances = {};
+
+      assert.strictEqual(result, numProcesses * iterationsPerProcess,
+        `Expected counter to be ${numProcesses * iterationsPerProcess}, got ${result}`);
+    });
+
+    it('should handle concurrent inc() from multiple processes', async function() {
+      this.timeout(30000);
+      
+      const dbName = 'mp-atomic-inc-test';
+      const numProcesses = 4;
+      const iterationsPerProcess = 25;
+
+      // Initialize
+      const driver = new JsonDriver({ name: dbName, path: multiProcessPath, multiProcess: true });
+      await driver.connect();
+      await driver.set('counter', 0);
+      await driver.disconnect();
+      JsonDriver._instances = {};
+
+      // Spawn processes using inc()
+      const workers = Array.from({ length: numProcesses }, () =>
+        spawnWorker({ name: dbName, path: multiProcessPath, task: 'inc', iterations: iterationsPerProcess })
+      );
+      await Promise.all(workers);
+
+      // Verify
+      const verifyDriver = new JsonDriver({ name: dbName, path: multiProcessPath, multiProcess: true });
+      await verifyDriver.connect();
+      const result = await verifyDriver.get('counter');
+      await verifyDriver.disconnect();
+      JsonDriver._instances = {};
+
+      assert.strictEqual(result, numProcesses * iterationsPerProcess,
+        `Expected counter to be ${numProcesses * iterationsPerProcess}, got ${result}`);
+    });
+
+    it('should preserve writes from different processes on different keys', async function() {
+      this.timeout(30000);
+      
+      const dbName = 'mp-keys-test';
+      const numProcesses = 3;
+      const iterationsPerProcess = 10;
+
+      // Initialize
+      const driver = new JsonDriver({ name: dbName, path: multiProcessPath, multiProcess: true });
+      await driver.connect();
+      await driver.set('entries', {});
+      await driver.disconnect();
+      JsonDriver._instances = {};
+
+      // Spawn processes that each write unique keys
+      const workers = Array.from({ length: numProcesses }, () =>
+        spawnWorker({ name: dbName, path: multiProcessPath, task: 'set-unique', iterations: iterationsPerProcess })
+      );
+      await Promise.all(workers);
+
+      // Verify all keys are present
+      const verifyDriver = new JsonDriver({ name: dbName, path: multiProcessPath, multiProcess: true });
+      await verifyDriver.connect();
+      const entries = await verifyDriver.get('entries');
+      await verifyDriver.disconnect();
+      JsonDriver._instances = {};
+
+      const totalKeys = Object.keys(entries).length;
+      const expected = numProcesses * iterationsPerProcess;
+      assert.strictEqual(totalKeys, expected,
+        `Expected ${expected} entries, got ${totalKeys}`);
+    });
+
+    it('should work correctly in single-process multiProcess mode', async function() {
+      this.timeout(5000);
+
+      const mpDb = new DeepBase(new JsonDriver({ 
+        name: 'mp-single-test', 
+        path: multiProcessPath, 
+        multiProcess: true 
+      }));
+      await mpDb.connect();
+
+      // Basic operations should still work
+      await mpDb.set('key', 'value');
+      assert.strictEqual(await mpDb.get('key'), 'value');
+
+      await mpDb.set('counter', 0);
+      const promises = Array.from({ length: 50 }, () => mpDb.inc('counter', 1));
+      await Promise.all(promises);
+      assert.strictEqual(await mpDb.get('counter'), 50);
+
+      await mpDb.set('user', 'name', 'Alice');
+      await mpDb.del('user', 'name');
+      const user = await mpDb.get('user');
+      assert.deepStrictEqual(user, {});
+
+      await mpDb.disconnect();
+      JsonDriver._instances = {};
+    });
+  });
+});
+
+describe('Multi-Driver: JsonDriver + SqliteDriver (add + pop + shift)', function() {
+  const multiDataPath = path.join(__dirname, 'test-data-multi');
+  let db, jsonDriver, sqliteDriver;
+  let testCounter = 0;
+
+  before(function() {
+    if (fs.existsSync(multiDataPath)) {
+      fs.rmSync(multiDataPath, { recursive: true, force: true });
+    }
+  });
+
+  beforeEach(async function() {
+    testCounter++;
+    JsonDriver._instances = {};
+    SqliteDriver._instances = {};
+
+    jsonDriver = new JsonDriver({ name: `multi-${testCounter}`, path: multiDataPath });
+    sqliteDriver = new SqliteDriver({ name: `multi-${testCounter}`, path: multiDataPath });
+
+    db = new DeepBase([jsonDriver, sqliteDriver]);
+    await db.connect();
+  });
+
+  afterEach(async function() {
+    await db.disconnect();
+    JsonDriver._instances = {};
+    SqliteDriver._instances = {};
+    if (fs.existsSync(multiDataPath)) {
+      fs.rmSync(multiDataPath, { recursive: true, force: true });
+    }
+  });
+
+  it('should write to both drivers on set', async function() {
+    await db.set('key', 'value');
+
+    const fromJson = await jsonDriver.get('key');
+    const fromSqlite = await sqliteDriver.get('key');
+
+    assert.strictEqual(fromJson, 'value');
+    assert.strictEqual(fromSqlite, 'value');
+  });
+
+  it('should keep both drivers in sync after add + pop (FIFO via shift)', async function() {
+    // Add items
+    await db.add('queue', 'first');
+    await db.add('queue', 'second');
+    await db.add('queue', 'third');
+
+    // Check both drivers have same number of items
+    const jsonBefore = await jsonDriver.get('queue');
+    const sqliteBefore = await sqliteDriver.get('queue');
+    assert.strictEqual(Object.keys(jsonBefore).length, 3, 'JSON should have 3 items');
+    assert.strictEqual(Object.keys(sqliteBefore).length, 3, 'SQLite should have 3 items');
+
+    // Check that both drivers have the same keys (same IDs)
+    const jsonKeys = Object.keys(jsonBefore).sort();
+    const sqliteKeys = Object.keys(sqliteBefore).sort();
+    assert.deepStrictEqual(jsonKeys, sqliteKeys, 'Both drivers should have the same keys');
+
+    // Shift (FIFO dequeue)
+    const shifted = await db.shift('queue');
+    assert.strictEqual(shifted, 'first');
+
+    // Both drivers should have 2 items remaining
+    const jsonAfter = await jsonDriver.get('queue');
+    const sqliteAfter = await sqliteDriver.get('queue');
+    assert.strictEqual(Object.keys(jsonAfter).length, 2, 'JSON should have 2 items after shift');
+    assert.strictEqual(Object.keys(sqliteAfter).length, 2, 'SQLite should have 2 items after shift');
+
+    // Remaining values should match
+    assert.deepStrictEqual(Object.values(jsonAfter), ['second', 'third']);
+    assert.deepStrictEqual(Object.values(sqliteAfter), ['second', 'third']);
+  });
+
+  it('should keep both drivers in sync after add + pop (LIFO)', async function() {
+    await db.add('stack', 'a');
+    await db.add('stack', 'b');
+    await db.add('stack', 'c');
+
+    // Pop (LIFO)
+    const popped = await db.pop('stack');
+    assert.strictEqual(popped, 'c');
+
+    // Both should have 2 items
+    const jsonAfter = await jsonDriver.get('stack');
+    const sqliteAfter = await sqliteDriver.get('stack');
+    assert.strictEqual(Object.keys(jsonAfter).length, 2, 'JSON should have 2 items after pop');
+    assert.strictEqual(Object.keys(sqliteAfter).length, 2, 'SQLite should have 2 items after pop');
+
+    // Same keys and values in both
+    assert.deepStrictEqual(Object.keys(jsonAfter).sort(), Object.keys(sqliteAfter).sort());
+    assert.deepStrictEqual(Object.values(jsonAfter), ['a', 'b']);
+    assert.deepStrictEqual(Object.values(sqliteAfter), ['a', 'b']);
+  });
+
+  it('should drain queue completely from both drivers', async function() {
+    await db.add('q', 1);
+    await db.add('q', 2);
+    await db.add('q', 3);
+
+    assert.strictEqual(await db.shift('q'), 1);
+    assert.strictEqual(await db.shift('q'), 2);
+    assert.strictEqual(await db.shift('q'), 3);
+    assert.strictEqual(await db.shift('q'), undefined);
+
+    // Both drivers should be empty (JSON returns {}, SQLite returns null when all keys deleted)
+    const jsonData = await jsonDriver.get('q');
+    const sqliteData = await sqliteDriver.get('q');
+    const jsonLen = jsonData ? Object.keys(jsonData).length : 0;
+    const sqliteLen = sqliteData ? Object.keys(sqliteData).length : 0;
+    assert.strictEqual(jsonLen, 0, 'JSON queue should be empty');
+    assert.strictEqual(sqliteLen, 0, 'SQLite queue should be empty');
+  });
+
+  it('should handle interleaved add + pop across both drivers', async function() {
+    await db.add('items', 'x');
+    await db.add('items', 'y');
+    assert.strictEqual(await db.pop('items'), 'y');
+
+    await db.add('items', 'z');
+    assert.strictEqual(await db.pop('items'), 'z');
+    assert.strictEqual(await db.pop('items'), 'x');
+    assert.strictEqual(await db.pop('items'), undefined);
+
+    // Both empty (JSON returns {}, SQLite returns null when all keys deleted)
+    const jsonData = await jsonDriver.get('items');
+    const sqliteData = await sqliteDriver.get('items');
+    const jsonLen = jsonData ? Object.keys(jsonData).length : 0;
+    const sqliteLen = sqliteData ? Object.keys(sqliteData).length : 0;
+    assert.strictEqual(jsonLen, 0, 'JSON items should be empty');
+    assert.strictEqual(sqliteLen, 0, 'SQLite items should be empty');
+  });
+
+  it('should maintain consistent len() across both drivers', async function() {
+    await db.add('list', 'a');
+    await db.add('list', 'b');
+    await db.add('list', 'c');
+
+    assert.strictEqual(await db.len('list'), 3);
+
+    // Check each driver directly
+    const jsonList = await jsonDriver.get('list');
+    const sqliteList = await sqliteDriver.get('list');
+    assert.strictEqual(Object.keys(jsonList).length, 3);
+    assert.strictEqual(Object.keys(sqliteList).length, 3);
+
+    await db.pop('list');
+
+    const jsonAfter = await jsonDriver.get('list');
+    const sqliteAfter = await sqliteDriver.get('list');
+    assert.strictEqual(Object.keys(jsonAfter).length, 2);
+    assert.strictEqual(Object.keys(sqliteAfter).length, 2);
+  });
+
+  it('should handle objects in multi-driver queue', async function() {
+    await db.add('tasks', { name: 'build', prio: 1 });
+    await db.add('tasks', { name: 'test', prio: 2 });
+    await db.add('tasks', { name: 'deploy', prio: 3 });
+
+    const first = await db.shift('tasks');
+    assert.deepStrictEqual(first, { name: 'build', prio: 1 });
+
+    const last = await db.pop('tasks');
+    assert.deepStrictEqual(last, { name: 'deploy', prio: 3 });
+
+    // Both drivers should have 1 item left
+    const jsonTasks = await jsonDriver.get('tasks');
+    const sqliteTasks = await sqliteDriver.get('tasks');
+    assert.strictEqual(Object.keys(jsonTasks).length, 1);
+    assert.strictEqual(Object.keys(sqliteTasks).length, 1);
+    assert.deepStrictEqual(Object.values(jsonTasks)[0], { name: 'test', prio: 2 });
+    assert.deepStrictEqual(Object.values(sqliteTasks)[0], { name: 'test', prio: 2 });
   });
 });
 
