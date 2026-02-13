@@ -152,16 +152,53 @@ new DeepBase(drivers, options)
 #### Queue / Stack Operations
 - `await db.pop(...path)` - Remove and return the last item
 - `await db.shift(...path)` - Remove and return the first item
-- `await db.len(...path)` - Count the number of keys at path
+
 
 #### Query Operations
 - `await db.keys(...path)` - Get keys at path
 - `await db.values(...path)` - Get values at path
 - `await db.entries(...path)` - Get entries at path
+- `await db.len(...path)` - Count the number of keys at path
 
 #### Migration
-- `await db.migrate(fromIndex, toIndex, options)` - Migrate data
+- `await db.migrate(fromIndex, toIndex, options)` - Migrate data between drivers
 - `await db.syncAll(options)` - Sync primary to all others
+
+**Migration Options:**
+- `clear` (default: `true`): Clear target driver before migration
+- `batchSize` (default: `100`): Progress callback frequency (items between calls)
+- `onProgress`: Callback `({ migrated, errors, current }) => {}` for monitoring
+
+**Returns:** `{ migrated, errors }` with counts of successful and failed items.
+
+```javascript
+import DeepBase, { JsonDriver } from 'deepbase';
+import SqliteDriver from 'deepbase-sqlite';
+
+const db = new DeepBase([
+  new SqliteDriver({ path: './data', name: 'mydb' }),  // index 0
+  new JsonDriver({ path: './backup', name: 'mydb' })   // index 1
+]);
+await db.connect();
+
+// Migrate SQLite → JSON (clears target first)
+const result = await db.migrate(0, 1);
+console.log(result); // { migrated: 5, errors: 0 }
+
+// Migrate JSON → SQLite (merge, keep existing data)
+await db.migrate(1, 0, { clear: false });
+
+// Migrate with progress reporting
+await db.migrate(0, 1, {
+  batchSize: 10,
+  onProgress: ({ migrated, errors, current }) => {
+    console.log(`${migrated} migrated | ${errors} errors | current: ${current}`);
+  }
+});
+
+// Sync primary (index 0) to all other drivers
+await db.syncAll();
+```
 
 #### Driver Management
 - `db.getDriver(index)` - Get specific driver
