@@ -1,6 +1,6 @@
 {
   "name": "deepbase-indexeddb",
-  "version": "3.4.10",
+  "version": "3.4.11",
   "description": "⚡ DeepBase IndexedDB - browser storage driver",
   "type": "module",
   "main": "src/index.cjs",
@@ -15,7 +15,7 @@
   },
   "dependencies": {},
   "peerDependencies": {
-    "deepbase": "^3.4.10"
+    "deepbase": "^3.4.11"
   },
   "scripts": {
     "test": "echo \"IndexedDB tests require browser environment. See test/test.html\""
