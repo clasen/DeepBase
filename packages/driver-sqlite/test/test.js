@@ -501,6 +501,237 @@ describe('SqliteDriver', function() {
     });
   });
 
+  describe('Object Expansion with Special Keys', function() {
+    it('should handle object with dotted keys when expanding', async function() {
+      // Store an object with dots in its property names
+      await db.set('config', { 'server.port': 8080, 'server.host': 'localhost' });
+      
+      // Trigger expansion by setting a nested property
+      await db.set('config', 'debug', true);
+      
+      const config = await db.get('config');
+      assert.strictEqual(config['server.port'], 8080);
+      assert.strictEqual(config['server.host'], 'localhost');
+      assert.strictEqual(config.debug, true);
+    });
+
+    it('should not crash on objects with empty string keys', async function() {
+      // This was the root cause of the production crash:
+      // empty string key produces trailing dot in DB, leading to empty path
+      await db.set('data', { '': 'empty_key_value', 'normal': 'ok' });
+      
+      // Trigger expansion
+      await db.set('data', 'extra', 123);
+      
+      const data = await db.get('data');
+      assert.strictEqual(data[''], 'empty_key_value');
+      assert.strictEqual(data.normal, 'ok');
+      assert.strictEqual(data.extra, 123);
+    });
+
+    it('should handle nested objects with dotted keys during expansion', async function() {
+      await db.set('replace', {
+        '{lang}': 'es',
+        '{first_name}': 'Martin',
+        '@main': 'martin'
+      });
+      
+      // Trigger expansion
+      await db.set('replace', '{lang}', 'en');
+      
+      const result = await db.get('replace');
+      assert.strictEqual(result['{lang}'], 'en');
+      assert.strictEqual(result['{first_name}'], 'Martin');
+      assert.strictEqual(result['@main'], 'martin');
+    });
+
+    it('should preserve dots in keys through set/get root object cycle', async function() {
+      const data = {
+        'api.v1.endpoint': 'https://api.example.com',
+        'api.v2.endpoint': 'https://v2.api.example.com'
+      };
+      
+      await db.set(data);
+      const result = await db.get();
+      assert.deepStrictEqual(result, data);
+    });
+  });
+
+  describe('Keys with Underscores (SQL LIKE safety)', function() {
+    it('should not cross-match keys with underscores', async function() {
+      // _ is a SQL LIKE wildcard that matches any single character
+      await db.set('chat_1', 'msg', 'hello');
+      await db.set('chatX1', 'msg', 'world');
+      
+      const chat1 = await db.get('chat_1');
+      assert.deepStrictEqual(chat1, { msg: 'hello' });
+      
+      const chatX1 = await db.get('chatX1');
+      assert.deepStrictEqual(chatX1, { msg: 'world' });
+    });
+
+    it('should isolate data between similar keys with underscores', async function() {
+      await db.set('user_42', 'name', 'Alice');
+      await db.set('userX42', 'name', 'Bob');
+      await db.set('user.42', 'name', 'Charlie');
+      
+      const u1 = await db.get('user_42');
+      const u2 = await db.get('userX42');
+      const u3 = await db.get('user.42');
+      
+      assert.deepStrictEqual(u1, { name: 'Alice' });
+      assert.deepStrictEqual(u2, { name: 'Bob' });
+      assert.deepStrictEqual(u3, { name: 'Charlie' });
+    });
+
+    it('should delete only matching keys with underscores', async function() {
+      await db.set('item_a', 'x', 1);
+      await db.set('itemXa', 'x', 2);
+      
+      await db.del('item_a');
+      
+      assert.strictEqual(await db.get('item_a'), null);
+      assert.deepStrictEqual(await db.get('itemXa'), { x: 2 });
+    });
+
+    it('should handle keys with percent signs', async function() {
+      await db.set('progress', '100%', 'done', true);
+      await db.set('progress', 'abc', 'done', false);
+      
+      const p100 = await db.get('progress', '100%');
+      assert.deepStrictEqual(p100, { done: true });
+      
+      const pabc = await db.get('progress', 'abc');
+      assert.deepStrictEqual(pabc, { done: false });
+    });
+  });
+
+  describe('Storybot-like Structure', function() {
+    it('should handle dotted top-level keys with deep nesting', async function() {
+      const sessionKey = 'stm.1769201539421.dawduxooy';
+      
+      await db.set(sessionKey, 'started', 'LuaGardenbot', true);
+      await db.set(sessionKey, 'active', 'LuaGardenbot', true);
+      await db.set(sessionKey, 'active', 'AmyWaybot', true);
+      
+      const session = await db.get(sessionKey);
+      assert.deepStrictEqual(session, {
+        started: { LuaGardenbot: true },
+        active: { LuaGardenbot: true, AmyWaybot: true }
+      });
+    });
+
+    it('should handle replace map with special chars in keys', async function() {
+      const sessionKey = 'stm.12345.abc';
+      
+      await db.set(sessionKey, 'replace', {
+        '{lang}': 'es',
+        '{vip_token}': '',
+        '{first_name}': 'STM User',
+        '{last_name}': '',
+        '{crypto_name}': 'kkerfhkkzgf',
+        '@main': 'martin'
+      });
+      
+      const replace = await db.get(sessionKey, 'replace');
+      assert.strictEqual(replace['{lang}'], 'es');
+      assert.strictEqual(replace['@main'], 'martin');
+      assert.strictEqual(replace['{first_name}'], 'STM User');
+    });
+
+    it('should handle node history with numeric-like keys', async function() {
+      const sessionKey = 'stm.999.xyz';
+      
+      await db.set(sessionKey, 'node', 'history', 'c0', {
+        from: 'LuaGardenbot',
+        message: 'new contact',
+        timestamp: 1771012955839
+      });
+      await db.set(sessionKey, 'node', 'history', '0-2760293686', {
+        from: 'LuaGardenbot',
+        message: 'Hey, I\'m Lua',
+        timestamp: 1771012956863
+      });
+      await db.set(sessionKey, 'node', 'history', '0-4151942372-o', {
+        from: 'main',
+        to: 'LuaGardenbot',
+        message: 'hola',
+        timestamp: 1771012960058
+      });
+      
+      const history = await db.get(sessionKey, 'node', 'history');
+      assert.strictEqual(Object.keys(history).length, 3);
+      assert.strictEqual(history['c0'].from, 'LuaGardenbot');
+      assert.strictEqual(history['0-2760293686'].message, 'Hey, I\'m Lua');
+      assert.strictEqual(history['0-4151942372-o'].to, 'LuaGardenbot');
+    });
+
+    it('should handle object expansion with replace map then set nested', async function() {
+      const sessionKey = 'stm.12345.abc';
+      
+      // Store replace map as object
+      await db.set(sessionKey, 'replace', {
+        '{lang}': 'es',
+        '{first_name}': 'User'
+      });
+      
+      // Now update a single key — triggers _expandParentObjects
+      await db.set(sessionKey, 'replace', '{lang}', 'en');
+      
+      const replace = await db.get(sessionKey, 'replace');
+      assert.strictEqual(replace['{lang}'], 'en');
+      assert.strictEqual(replace['{first_name}'], 'User');
+    });
+
+    it('should handle full session lifecycle without crash', async function() {
+      const sessionKey = 'stm.1769201539421.dawduxooy';
+      
+      // Initial object-style set
+      await db.set(sessionKey, 'replace', {
+        '{lang}': 'es',
+        '{vip_token}': '',
+        '{first_name}': 'STM User'
+      });
+      
+      await db.set(sessionKey, 'config', { country: '', gender: 'M' });
+      await db.set(sessionKey, 'tokens', { input: 4554, output: 229, cost: 0.0079825 });
+      
+      // Nested individual sets
+      await db.set(sessionKey, 'started', 'LuaGardenbot', true);
+      await db.set(sessionKey, 'active', 'LuaGardenbot', true);
+      await db.set(sessionKey, 'active', 'AmyWaybot', true);
+      await db.set(sessionKey, 'node', 'current', 'chapter', 2);
+      await db.set(sessionKey, 'node', 'current', 'id', '50-326833713');
+      
+      // Update inside previously stored object — triggers expansion
+      await db.set(sessionKey, 'replace', '{lang}', 'en');
+      await db.set(sessionKey, 'config', 'country', 'AR');
+      
+      // Verify everything
+      const session = await db.get(sessionKey);
+      
+      assert.strictEqual(session.replace['{lang}'], 'en');
+      assert.strictEqual(session.replace['{first_name}'], 'STM User');
+      assert.strictEqual(session.config.country, 'AR');
+      assert.strictEqual(session.config.gender, 'M');
+      assert.strictEqual(session.tokens.cost, 0.0079825);
+      assert.strictEqual(session.started.LuaGardenbot, true);
+      assert.strictEqual(session.active.AmyWaybot, true);
+      assert.strictEqual(session.node.current.chapter, 2);
+      assert.strictEqual(session.node.current.id, '50-326833713');
+    });
+
+    it('should not mix sessions with similar dotted keys', async function() {
+      await db.set('stm.111.aaa', 'data', 'session1');
+      await db.set('stm.111.bbb', 'data', 'session2');
+      await db.set('stm.222.aaa', 'data', 'session3');
+      
+      assert.deepStrictEqual(await db.get('stm.111.aaa'), { data: 'session1' });
+      assert.deepStrictEqual(await db.get('stm.111.bbb'), { data: 'session2' });
+      assert.deepStrictEqual(await db.get('stm.222.aaa'), { data: 'session3' });
+    });
+  });
+
   describe('Race Conditions', function() {
     it('should handle 100 concurrent increments correctly', async function() {
       this.timeout(5000);

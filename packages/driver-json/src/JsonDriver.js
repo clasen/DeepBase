@@ -193,6 +193,8 @@ export class JsonDriver extends DeepBaseDriver {
   }
   
   _setRecursive(obj, keys, value) {
+    if (keys.length === 0) return;
+    
     if (keys.length === 1) {
       obj[keys[0]] = value;
       return;

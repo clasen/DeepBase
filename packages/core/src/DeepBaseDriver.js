@@ -129,7 +129,7 @@ export class DeepBaseDriver {
       }
     }
     
-    if (current) {
+    if (current || parts.length > 0) {
       parts.push(this._unescapeDots(current));
     }
     

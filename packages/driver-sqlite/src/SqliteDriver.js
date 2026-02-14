@@ -44,7 +44,7 @@ export class SqliteDriver extends DeepBaseDriver {
     this.setStmt = this.db.prepare('INSERT OR REPLACE INTO deepbase (key, value) VALUES (?, ?)');
     this.delStmt = this.db.prepare('DELETE FROM deepbase WHERE key = ?');
     this.getAllStmt = this.db.prepare('SELECT key, value FROM deepbase');
-    this.getKeysLikeStmt = this.db.prepare('SELECT key, value FROM deepbase WHERE key LIKE ?');
+    this.getKeysLikeStmt = this.db.prepare('SELECT key, value FROM deepbase WHERE key LIKE ? ESCAPE \'!\'');
     
     this._connected = true;
   }
@@ -70,8 +70,7 @@ export class SqliteDriver extends DeepBaseDriver {
     const row = this.getStmt.get(key);
     
     // Check if there are child keys (nested properties)
-    const childKey = key + '.';
-    const children = this.getKeysLikeStmt.all(childKey + '%');
+    const children = this.getKeysLikeStmt.all(this._likePrefix(key));
     
     // If there are children, build object from them
     if (children.length > 0) {
@@ -145,8 +144,7 @@ export class SqliteDriver extends DeepBaseDriver {
       this.delStmt.run(key);
       
       // Delete all children
-      const childKey = key + '.';
-      this.db.prepare('DELETE FROM deepbase WHERE key LIKE ?').run(childKey + '%');
+      this.db.prepare('DELETE FROM deepbase WHERE key LIKE ? ESCAPE \'!\'').run(this._likePrefix(key));
     });
     
     transaction();
@@ -213,8 +211,7 @@ export class SqliteDriver extends DeepBaseDriver {
   }
   
   _buildObjectFromChildren(parentKey) {
-    const prefix = parentKey ? parentKey + '.' : '';
-    const rows = this.getKeysLikeStmt.all(prefix + '%');
+    const rows = this.getKeysLikeStmt.all(parentKey ? this._likePrefix(parentKey) : '%');
     const result = {};
     
     for (const row of rows) {
@@ -230,7 +227,17 @@ export class SqliteDriver extends DeepBaseDriver {
     return result;
   }
   
+  _escapeLikePattern(str) {
+    return str.replace(/[!%_]/g, '!$&');
+  }
+
+  _likePrefix(key) {
+    return this._escapeLikePattern(key) + '.%';
+  }
+
   _setNestedValue(obj, path, value) {
+    if (path.length === 0) return;
+    
     if (path.length === 1) {
       obj[path[0]] = value;
       return;
@@ -248,7 +255,8 @@ export class SqliteDriver extends DeepBaseDriver {
     const entries = [];
     
     for (const [key, value] of Object.entries(obj)) {
-      const fullKey = prefix ? `${prefix}.${key}` : key;
+      const escapedKey = this._escapeDots(String(key));
+      const fullKey = prefix ? `${prefix}.${escapedKey}` : escapedKey;
       
       if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
         entries.push(...this._flattenObject(value, fullKey));
