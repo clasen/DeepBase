@@ -25,6 +25,8 @@ export class SqliteDriver extends DeepBaseDriver {
   }
   
   async connect() {
+    if (this._connected) return;
+    
     if (!fs.existsSync(this.path)) {
       fs.mkdirSync(this.path, { recursive: true });
     }
@@ -54,6 +56,7 @@ export class SqliteDriver extends DeepBaseDriver {
       this.db.close();
       this.db = null;
     }
+    this._connected = false;
   }
   
   async get(...args) {

@@ -388,6 +388,20 @@ describe('SqliteDriver', function() {
       const result = await db.get('before');
       assert.strictEqual(result, 'disconnect');
     });
+
+    it('should be a no-op when already connected', async function() {
+      await db.set('key', 'value');
+      
+      // connect again while already connected
+      await db.connect();
+      
+      // data and operations should be unaffected
+      const result = await db.get('key');
+      assert.strictEqual(result, 'value');
+      
+      await db.set('key2', 'value2');
+      assert.strictEqual(await db.get('key2'), 'value2');
+    });
   });
 
   describe('Singleton Pattern', function() {

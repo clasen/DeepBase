@@ -36,6 +36,8 @@ export class JsonDriver extends DeepBaseDriver {
   }
   
   async connect() {
+    if (this._connected) return;
+    
     if (!fs.existsSync(this.path)) {
       fs.mkdirSync(this.path, { recursive: true });
     }
@@ -53,6 +55,7 @@ export class JsonDriver extends DeepBaseDriver {
   
   async disconnect() {
     await this._saveToFile();
+    this._connected = false;
   }
   
   async get(...args) {
