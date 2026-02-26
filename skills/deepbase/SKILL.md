@@ -1,8 +1,8 @@
 ---
 name: deepbase
-description: Instructions for using the DeepBase multi-driver persistence library. Use when a task requires data persistence, storage abstraction, multi-backend setups, data migration between drivers, or integrating DeepBase into a Node.js project.
-version: 3.4.4
-tags: [nodejs, persistence, database, multi-driver, mongodb, redis, sqlite, json]
+description: Instructions for working with DeepBase, a multi-driver persistence library for Node.js. Use when the user needs to store or retrieve data, add persistence to a project, set up a key-value store, work with SQLite/MongoDB/Redis/JSON storage, migrate data between backends, handle multi-driver failover, or says things like "save data", "persist data", "I need a database", "store user data", "set up storage", or "integrate DeepBase". Do NOT use for full ORM/relational query needs or raw SQL work.
+metadata:
+  tags: [nodejs, persistence, database, multi-driver, mongodb, redis, sqlite, json]
 ---
 
 # DeepBase
@@ -12,18 +12,20 @@ tags: [nodejs, persistence, database, multi-driver, mongodb, redis, sqlite, json
 DeepBase is a multi-driver persistence system for Node.js that provides a unified API across storage backends (JSON, SQLite, MongoDB, Redis, IndexedDB). It allows switching or combining backends without changing application code.
 
 **Use this skill when:**
-- Adding persistence to a Node.js project
+- Adding or integrating persistence into a Node.js project
 - Setting up multi-backend storage with automatic failover
 - Migrating data between storage drivers
 - Working with nested object paths for data access
-- Integrating any DeepBase driver package
+- Integrating any DeepBase driver package (`deepbase`, `deepbase-sqlite`, `deepbase-mongodb`, etc.)
 
 **Do NOT use this skill when:**
 - The project needs a full ORM or relational query builder (use Prisma, Drizzle, etc.)
 - The project requires SQL queries, joins, or complex aggregations
 - The task is about browser-only storage without DeepBase (use raw IndexedDB/localStorage)
 
-## Installation
+## Quick Start
+
+### Step 1: Install
 
 ```bash
 # Core package (includes JSON driver by default)
@@ -37,7 +39,38 @@ npm install deepbase-redis-json   # Redis Stack (RedisJSON)
 npm install deepbase-indexeddb    # Browser IndexedDB
 ```
 
-The core `deepbase` package depends on `deepbase-json` and `nanoid`. No other drivers are required unless explicitly used.
+Check `package.json` first — avoid reinstalling if `deepbase` is already listed.
+
+### Step 2: Create and use a store
+
+```javascript
+import DeepBase from 'deepbase';
+
+const db = new DeepBase({ path: './data', name: 'app' });
+// No need to call connect() — lazy connect handles it automatically
+
+await db.set('config', 'theme', 'dark');
+const theme = await db.get('config', 'theme'); // 'dark'
+
+await db.disconnect(); // Always disconnect on shutdown
+```
+
+### Step 3: Go multi-driver (when resilience is needed)
+
+```javascript
+import DeepBase from 'deepbase';
+import { JsonDriver } from 'deepbase-json';
+import { MongoDriver } from 'deepbase-mongodb';
+
+const db = new DeepBase([
+  new MongoDriver({ url: process.env.MONGO_URL, database: 'myapp', collection: 'data' }),
+  new JsonDriver({ path: './backup', name: 'fallback' })
+], {
+  writeAll: true,            // Write to all drivers (default: true)
+  readFirst: true,           // Read from first available (default: true)
+  failOnPrimaryError: false  // Continue if primary fails
+});
+```
 
 ## Imports
 
@@ -56,44 +89,6 @@ import { SqliteDriver } from 'deepbase-sqlite';
 import { RedisDriver } from 'deepbase-redis';
 import { RedisDriver as RedisJsonDriver } from 'deepbase-redis-json';
 import { IndexedDBDriver } from 'deepbase-indexeddb';
-```
-
-## Basic Usage
-
-### Single driver (JSON — simplest setup)
-
-```javascript
-import DeepBase from 'deepbase';
-
-const db = new DeepBase({ path: './data', name: 'app' });
-await db.connect();
-
-await db.set('config', 'theme', 'dark');
-const theme = await db.get('config', 'theme'); // 'dark'
-
-await db.disconnect();
-```
-
-Lazy connect is enabled by default — `connect()` is called automatically on first operation if omitted.
-
-### Multi-driver with failover
-
-```javascript
-import DeepBase from 'deepbase';
-import { JsonDriver } from 'deepbase-json';
-import { MongoDriver } from 'deepbase-mongodb';
-
-const db = new DeepBase([
-  new MongoDriver({ url: 'mongodb://localhost:27017', database: 'myapp', collection: 'data' }),
-  new JsonDriver({ path: './backup', name: 'fallback' })
-], {
-  writeAll: true,            // Write to all drivers (default: true)
-  readFirst: true,           // Read from first available (default: true)
-  failOnPrimaryError: false  // Continue if primary fails
-});
-
-await db.connect();
-// Writes go to both MongoDB and JSON; reads try MongoDB first, fall back to JSON
 ```
 
 ## API Reference
@@ -176,7 +171,9 @@ new DeepBase(drivers, {
 | `RedisJsonDriver` | `url`, `prefix` (requires Redis Stack with RedisJSON module) |
 | `IndexedDBDriver` | `name`, `version` |
 
-## Agent Usage Rules
+## Rules for Agents
+
+Follow these rules when generating DeepBase code:
 
 1. **Check before installing.** Verify `package.json` for existing `deepbase` dependency before running `npm install`.
 2. **Use the official API.** Never manipulate driver internals or the underlying JSON/SQLite/Mongo storage directly. Always go through `db.get()`, `db.set()`, etc.
@@ -188,6 +185,28 @@ new DeepBase(drivers, {
 8. **Set `failOnPrimaryError: false` for resilient setups.** When using multi-driver for fault tolerance, disable this so operations continue via fallback drivers.
 9. **Use environment variables for connection strings.** Never hardcode MongoDB URLs or Redis URLs in source code.
 10. **Prefer `deepbase-redis-json` over `deepbase-redis`** when working with Redis Stack, as it supports native JSON operations.
+
+## Examples
+
+**Example 1: Adding a simple persistent store to a new project**
+User says: "I need to persist user settings in my Node.js app."
+Actions: Install `deepbase`, create a `DeepBase` instance with `JsonDriver`, use `set`/`get` for nested keys.
+Result: A `./data/settings.json` file managed transparently via the DeepBase API.
+
+**Example 2: Multi-driver setup with MongoDB primary and JSON fallback**
+User says: "I want MongoDB as my main database but with a local JSON backup in case it goes down."
+Actions: Create `DeepBase` with `[MongoDriver, JsonDriver]`, set `writeAll: true` and `failOnPrimaryError: false`. Use `process.env.MONGO_URL`.
+Result: All writes go to both drivers; reads use MongoDB first and fall back to JSON silently.
+
+**Example 3: Migrating data from JSON to SQLite**
+User says: "I want to move my existing JSON data into SQLite."
+Actions: Create `DeepBase` with both drivers loaded, call `db.migrate(0, 1, { clear: true })`.
+Result: All data is transferred from the JSON file to the SQLite database.
+
+**Example 4: Auto-ID collection**
+User says: "I want to store multiple users with unique IDs automatically."
+Actions: Use `db.add('users', { name, email })`, capture the returned path array, use `db.get(...path)` to retrieve.
+Result: Each user gets a nanoid-based key under `users`.
 
 ## Common Tasks
 
