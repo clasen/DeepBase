@@ -1,6 +1,6 @@
 {
   "name": "deepbase-redis",
-  "version": "3.4.12",
+  "version": "3.5.1",
   "description": "⚡ DeepBase Redis (vanilla) - driver",
   "type": "module",
   "main": "src/index.cjs",
@@ -17,7 +17,7 @@
     "redis": "^4.7.0"
   },
   "peerDependencies": {
-    "deepbase": "^3.4.12"
+    "deepbase": "^3.5.1"
   },
   "scripts": {
     "test": "mocha test/test.js"
