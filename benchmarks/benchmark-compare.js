@@ -199,7 +199,7 @@ async function runComparison() {
     
     if (fastest) {
       const emoji = fastest === 'json' ? '📁' : 
-                    fastest === 'sqlite' ? '🗄️' : 
+                    fastest === 'sqlite' ? '🗄️' :
                     fastest === 'mongodb' ? '🍃' : 
                     fastest === 'redis' ? '⚡' : '📊';
       console.log(`   ${emoji} ${op.toUpperCase().padEnd(12)} → ${fastest.toUpperCase()} (${fastestOps.toFixed(2)} ops/sec)`);
@@ -243,7 +243,7 @@ async function runComparison() {
   
   if (mostEfficient) {
     const emoji = mostEfficient === 'json' ? '📁' : 
-                  mostEfficient === 'sqlite' ? '🗄️' : 
+                  mostEfficient === 'sqlite' ? '🗄️' :
                   mostEfficient === 'mongodb' ? '🍃' : 
                   mostEfficient === 'redis' ? '⚡' : '📊';
     console.log(`\n💾 Most Memory Efficient: ${emoji} ${mostEfficient.toUpperCase()} (${lowestDelta.toFixed(2)} MB delta)\n`);

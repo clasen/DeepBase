@@ -27,7 +27,8 @@ import SqliteDriver from 'deepbase-sqlite';
 
 const db = new DeepBase(new SqliteDriver({
   path: './data',
-  name: 'mydb'
+  name: 'mydb',
+  pragma: 'balanced' // default — omit for same result
 }));
 
 await db.connect();
@@ -42,6 +43,7 @@ const alice = await db.get('users', 'alice');
 new SqliteDriver({
   path: './data',              // Directory to store database files
   name: 'default',            // Database filename (without .db)
+  pragma: 'balanced',         // Performance profile: 'none' | 'safe' | 'balanced' | 'fast'
   nidAlphabet: 'ABC...',      // Alphabet for ID generation
   nidLength: 10               // Length of generated IDs
 })
@@ -84,15 +86,56 @@ SQLite provides:
 - **Isolation**: Concurrent operations don't interfere
 - **Durability**: Committed data persists even after crashes
 
+## Pragma Modes
+
+`SqliteDriver` ships with four configurable performance profiles via the `pragma` option:
+
+| Mode | `synchronous` | `cache_size` | `mmap_size` | `WITHOUT ROWID` | Use case |
+|------|--------------|-------------|-------------|-----------------|----------|
+| **none** | — | — | — | No | Backward-compatible with databases created by older versions |
+| **safe** | FULL | 2 MB | off | Yes | Durability first, WAL + full fsync |
+| **balanced** *(default)* | NORMAL | 8 MB | 256 MB | Yes | Best mix of speed and safety for most apps |
+| **fast** | OFF | 16 MB | 256 MB | Yes | Maximum throughput — data may be lost on OS crash |
+
+All WAL modes use `journal_mode=WAL`, `temp_store=MEMORY`, and `busy_timeout=5000ms`.
+
+```javascript
+// Backward-compatible (no PRAGMAs, no WITHOUT ROWID)
+new SqliteDriver({ name: 'mydb', pragma: 'none' })
+
+// Maximum durability
+new SqliteDriver({ name: 'mydb', pragma: 'safe' })
+
+// Recommended (default)
+new SqliteDriver({ name: 'mydb', pragma: 'balanced' })
+
+// Maximum throughput
+new SqliteDriver({ name: 'mydb', pragma: 'fast' })
+```
+
+`SqliteFastDriver` is kept as a named alias for backward compatibility:
+
+```javascript
+import { SqliteFastDriver } from 'deepbase-sqlite';
+// SqliteFastDriver === SqliteDriver (same class, same options)
+```
+
 ## Database Structure
 
 Data is stored in a simple key-value table:
 
 ```sql
+-- pragma: 'none' (legacy-compatible)
 CREATE TABLE deepbase (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
 )
+
+-- pragma: 'safe' | 'balanced' | 'fast' (optimized)
+CREATE TABLE deepbase (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+) WITHOUT ROWID
 ```
 
 Example data:
@@ -166,6 +209,27 @@ data/
 | Query Speed | 🚀 Indexed | 🔍 Full scan |
 | Reliability | 💪 Very High | ⚠️ File corruption risk |
 | Debugging | 🔧 SQL tools | 👁️ Easy to inspect |
+
+## Benchmark — pragma modes
+
+Median of 3 runs, 1 000 iterations per operation. `balanced` vs `none`:
+
+```
+Operation                  none    safe    balanced    fast   Bal vs None
+─────────────────────────────────────────────────────────────────────────
+Sequential Write          4,525  17,296     84,701  98,238      +1772%
+Sequential Read          20,705  22,871     23,405  23,040        +13%
+Update                    2,689  10,666     17,764  18,857       +561%
+Increment                 4,291  14,129     25,734  26,364       +500%
+Delete                    3,806  12,010     20,884  21,074       +449%
+Batch Write               3,813  17,763     87,209  83,045      +2187%
+Concurrent Write          4,449  22,196     72,613 102,458      +1532%
+Deep Write (5-lvl)        4,311  26,740     53,957  91,312      +1152%
+Obj Expansion             1,997     365     34,633  47,318      +1634%
+Session Lifecycle           572   2,465      3,700   3,792       +546%
+```
+
+Disk usage is **29 % smaller** after compaction compared to `none`. All correctness checks pass on every mode.
 
 ## Best Practices
 

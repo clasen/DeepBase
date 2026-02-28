@@ -20,6 +20,7 @@
     "bench:redis": "cd benchmarks && node benchmark-redis.js",
     "bench:redis-json": "cd benchmarks && node benchmark-redis-json.js",
     "bench:sqlite": "cd benchmarks && node benchmark-sqlite.js",
+    "bench:sqlite-compare": "cd benchmarks && node benchmark-sqlite-compare.js",
     "bench:compare": "cd benchmarks && node benchmark-compare.js",
     "bench:migration": "cd benchmarks && node benchmark-migration.js",
     "bench:run-all": "cd benchmarks && node run-all.js",

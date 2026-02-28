@@ -85,7 +85,7 @@ const { DeepBase } = require('deepbase');
 // Individual drivers
 import { JsonDriver } from 'deepbase-json';
 import { MongoDriver } from 'deepbase-mongodb';
-import { SqliteDriver } from 'deepbase-sqlite';
+import { SqliteDriver } from 'deepbase-sqlite'; // pragma: 'none'|'safe'|'balanced'(default)|'fast'
 import { RedisDriver } from 'deepbase-redis';
 import { RedisDriver as RedisJsonDriver } from 'deepbase-redis-json';
 import { IndexedDBDriver } from 'deepbase-indexeddb';
@@ -165,7 +165,7 @@ new DeepBase(drivers, {
 | Driver | Key Options |
 |--------|-------------|
 | `JsonDriver` | `path` (directory), `name` (filename), `stringify` / `parse` (custom serialization) |
-| `SqliteDriver` | `path` (directory), `name` (database filename) |
+| `SqliteDriver` | `path` (directory), `name` (database filename), `pragma` (`'none'` \| `'safe'` \| `'balanced'` \| `'fast'`, default `'balanced'`) |
 | `MongoDriver` | `url`, `database`, `collection` |
 | `RedisDriver` | `url`, `prefix` |
 | `RedisJsonDriver` | `url`, `prefix` (requires Redis Stack with RedisJSON module) |
@@ -308,6 +308,27 @@ All methods listed in `DeepBaseDriver` must be implemented. `keys()`, `values()`
 - **MongoDB/Redis connection fails silently** — Set `failOnPrimaryError: true` (default) to surface connection errors, or check `connect()` return value for `{ connected, total }`.
 - **Data not synced across drivers** — Ensure `writeAll: true` (default). For existing data, use `db.migrate()` or `db.syncAll()`.
 - **Stale reads after failover** — The fallback driver may have older data. Use `db.syncAll()` after the primary recovers.
+
+## SqliteDriver Pragma Modes
+
+`SqliteDriver` accepts a `pragma` option that controls performance vs. durability:
+
+| Mode | When to use |
+|------|-------------|
+| `none` | Opening a database created by an older version of the driver (no WAL, no `WITHOUT ROWID`) |
+| `safe` | Apps where data integrity matters more than speed (WAL + `synchronous=FULL`) |
+| `balanced` *(default)* | Recommended for most apps — fast writes with WAL + `synchronous=NORMAL` |
+| `fast` | Maximum throughput — risk of data loss on OS crash (`synchronous=OFF`) |
+
+```javascript
+// Default (balanced) — just omit pragma
+new SqliteDriver({ path: './data', name: 'app' })
+
+// Explicit mode
+new SqliteDriver({ path: './data', name: 'app', pragma: 'fast' })
+```
+
+Benchmark gains of `balanced` vs `none`: **+1772%** write, **+2187%** batch write, **29% smaller** disk (compacted). All modes pass the full test suite.
 
 ## References
 

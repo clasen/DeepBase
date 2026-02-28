@@ -14,7 +14,8 @@
     }
   },
   "dependencies": {
-    "better-sqlite3": "^11.8.1"
+    "better-sqlite3": "^11.8.1",
+    "msgpackr": "^1.11.8"
   },
   "peerDependencies": {
     "deepbase": "^3.4.12"
