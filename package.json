@@ -1,6 +1,6 @@
 {
   "name": "deepbase-monorepo",
-  "version": "3.5.1",
+  "version": "3.6.0",
   "description": "DeepBase - Multi-driver persistence system monorepo",
   "private": true,
   "type": "module",
@@ -8,28 +8,31 @@
     "packages/*"
   ],
   "scripts": {
-    "test": "npm test -w deepbase && npm test -w deepbase-json && npm test -w deepbase-mongodb && npm test -w deepbase-redis && npm test -w deepbase-redis-json && npm test -w deepbase-sqlite",
+    "test": "npm test -w deepbase && npm test -w deepbase-json && npm test -w deepbase-mongodb && npm test -w deepbase-redis && npm test -w deepbase-redis-json && npm test -w deepbase-sqlite && npm test -w deepbase-drizzle",
     "test:core": "npm test -w deepbase",
     "test:json": "npm test -w deepbase-json",
     "test:mongodb": "npm test -w deepbase-mongodb",
     "test:redis": "npm test -w deepbase-redis",
     "test:redis-json": "npm test -w deepbase-redis-json",
     "test:sqlite": "npm test -w deepbase-sqlite",
+    "test:drizzle": "npm test -w deepbase-drizzle",
     "bench:json": "cd benchmarks && node benchmark-json.js",
     "bench:mongodb": "cd benchmarks && node benchmark-mongodb.js",
     "bench:redis": "cd benchmarks && node benchmark-redis.js",
     "bench:redis-json": "cd benchmarks && node benchmark-redis-json.js",
     "bench:sqlite": "cd benchmarks && node benchmark-sqlite.js",
+    "bench:drizzle": "cd benchmarks && node benchmark-drizzle.js",
     "bench:sqlite-compare": "cd benchmarks && node benchmark-sqlite-compare.js",
     "bench:compare": "cd benchmarks && node benchmark-compare.js",
     "bench:migration": "cd benchmarks && node benchmark-migration.js",
     "bench:run-all": "cd benchmarks && node run-all.js",
-    "bench:all": "npm run bench:json && npm run bench:mongodb && npm run bench:redis && npm run bench:redis-json && npm run bench:sqlite && npm run bench:compare && npm run bench:migration",
+    "bench:all": "npm run bench:json && npm run bench:mongodb && npm run bench:redis && npm run bench:redis-json && npm run bench:sqlite && npm run bench:drizzle && npm run bench:compare && npm run bench:migration",
     "example1": "cd examples && node 01-simple-json.js",
     "example2": "cd examples && node 02-multi-driver.js",
     "example3": "cd examples && node 03-migration.js",
     "example4": "cd examples && node 04-three-tier.js",
     "example5": "cd examples && node 05-sqlite.js",
+    "example14": "cd examples && node 14-drizzle-sqlite.js",
     "publish": "node scripts/publish.js",
     "publish:patch": "node scripts/publish.js patch",
     "publish:minor": "node scripts/publish.js minor",
@@ -50,5 +53,8 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/clasen/DeepBase.git"
+  },
+  "devDependencies": {
+    "better-sqlite3": "^11.8.1"
   }
 }

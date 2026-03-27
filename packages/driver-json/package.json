@@ -1,6 +1,6 @@
 {
   "name": "deepbase-json",
-  "version": "3.5.1",
+  "version": "3.6.0",
   "description": "⚡ DeepBase JSON - filesystem driver",
   "type": "module",
   "main": "src/index.cjs",
@@ -18,7 +18,7 @@
     "steno": "^0.4.4"
   },
   "peerDependencies": {
-    "deepbase": "^3.5.1"
+    "deepbase": "^3.6.0"
   },
   "scripts": {
     "test": "mocha test/test.js"

@@ -1,7 +1,7 @@
 {
-  "name": "deepbase-indexeddb",
+  "name": "deepbase-drizzle",
   "version": "3.6.0",
-  "description": "⚡ DeepBase IndexedDB - browser storage driver",
+  "description": "DeepBase driver for Drizzle ORM (bring your own database client + schema)",
   "type": "module",
   "main": "src/index.cjs",
   "module": "src/index.js",
@@ -13,12 +13,16 @@
       "import": "./src/index.js"
     }
   },
-  "dependencies": {},
   "peerDependencies": {
-    "deepbase": "^3.6.0"
+    "deepbase": "^3.6.0",
+    "drizzle-orm": "^0.36.0"
   },
   "scripts": {
-    "test": "echo \"IndexedDB tests require browser environment. See test/test.html\""
+    "test": "mocha test/test.js"
+  },
+  "devDependencies": {
+    "drizzle-orm": "^0.36.4",
+    "mocha": "^10.8.2"
   },
   "repository": {
     "type": "git",
@@ -26,20 +30,18 @@
   },
   "keywords": [
     "deepbase",
-    "indexeddb",
-    "browser",
+    "drizzle",
+    "drizzle-orm",
     "driver",
     "database",
     "persist",
     "nested",
-    "objects",
-    "offline",
-    "pwa"
+    "objects"
   ],
   "author": "Martin Clasen",
   "license": "MIT",
   "bugs": {
     "url": "https://github.com/clasen/DeepBase/issues"
   },
-  "homepage": "https://github.com/clasen/DeepBase/tree/main/packages/driver-indexeddb"
+  "homepage": "https://github.com/clasen/DeepBase/tree/main/packages/driver-drizzle"
 }

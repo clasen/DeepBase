@@ -1,6 +1,6 @@
 {
   "name": "deepbase-mongodb",
-  "version": "3.5.1",
+  "version": "3.6.0",
   "description": "⚡ DeepBase MongoDB - MongoDB database driver",
   "type": "module",
   "main": "src/index.cjs",
@@ -17,7 +17,7 @@
     "mongodb": "^6.15.0"
   },
   "peerDependencies": {
-    "deepbase": "^3.5.1"
+    "deepbase": "^3.6.0"
   },
   "scripts": {
     "test": "mocha test/test.js"
