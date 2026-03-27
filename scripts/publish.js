@@ -44,6 +44,7 @@ const PACKAGES = [
   { name: 'deepbase-redis', path: 'packages/driver-redis' },
   { name: 'deepbase-redis-json', path: 'packages/driver-redis-json' },
   { name: 'deepbase-sqlite', path: 'packages/driver-sqlite' },
+  { name: 'deepbase-drizzle', path: 'packages/driver-drizzle' },
   { name: 'deepbase-indexeddb', path: 'packages/driver-indexeddb' },
 ];
 

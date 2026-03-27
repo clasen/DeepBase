@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { DeepBase } from '../../core/src/index.js';
-import { SqliteDriver } from '../src/SqliteDriver.js';
+import { createSqliteDrizzleDriver } from './sqlite-fixture.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const testDataPath = path.join(__dirname, 'test-data');
@@ -11,7 +11,7 @@ const testDataPath = path.join(__dirname, 'test-data');
 const PRAGMA_MODES = ['none', 'safe', 'balanced', 'fast'];
 
 for (const pragma of PRAGMA_MODES) {
-  describe(`SqliteDriver [pragma=${pragma}]`, function () {
+  describe(`DrizzleDriver [pragma=${pragma}]`, function () {
     let db;
     let testCounter = 0;
 
@@ -23,11 +23,13 @@ for (const pragma of PRAGMA_MODES) {
 
     beforeEach(async function () {
       testCounter++;
-      db = new DeepBase(new SqliteDriver({
-        name: `test-${pragma}-${testCounter}`,
-        path: testDataPath,
-        pragma,
-      }));
+      db = new DeepBase(
+        createSqliteDrizzleDriver({
+          name: `test-${pragma}-${testCounter}`,
+          path: testDataPath,
+          pragma,
+        }),
+      );
       await db.connect();
     });
 
@@ -95,10 +97,15 @@ for (const pragma of PRAGMA_MODES) {
         assert.strictEqual(driver.getSync('nonexistent'), null);
       });
 
-      it('getSync lazy-connects when not connected', function () {
-        const driver = new SqliteDriver({ name: 'getSync-lazy', path: testDataPath });
+      it('getSync works without prior connect() and marks connected', function () {
+        const driver = createSqliteDrizzleDriver({
+          name: 'getSync-lazy',
+          path: testDataPath,
+          pragma,
+        });
         assert.strictEqual(driver.getSync('key'), null);
         assert.ok(driver._connected);
+        driver.client.close();
       });
     });
 
@@ -282,11 +289,13 @@ for (const pragma of PRAGMA_MODES) {
 
     describe('Persistence', function () {
       it('should persist data to database file', async function () {
-        const persistDb = new DeepBase(new SqliteDriver({
-          name: `persist-${pragma}`,
-          path: testDataPath,
-          pragma,
-        }));
+        const persistDb = new DeepBase(
+          createSqliteDrizzleDriver({
+            name: `persist-${pragma}`,
+            path: testDataPath,
+            pragma,
+          }),
+        );
         await persistDb.connect();
         await persistDb.set('persistent', 'data');
         await persistDb.disconnect();
@@ -294,21 +303,25 @@ for (const pragma of PRAGMA_MODES) {
       });
 
       it('should load existing data on connect', async function () {
-        const db1 = new DeepBase(new SqliteDriver({
-          name: `reload-${pragma}`,
-          path: testDataPath,
-          pragma,
-        }));
+        const db1 = new DeepBase(
+          createSqliteDrizzleDriver({
+            name: `reload-${pragma}`,
+            path: testDataPath,
+            pragma,
+          }),
+        );
         await db1.connect();
         await db1.set('existing', 'value');
         await db1.set('nested', 'key', 'data');
         await db1.disconnect();
 
-        const db2 = new DeepBase(new SqliteDriver({
-          name: `reload-${pragma}`,
-          path: testDataPath,
-          pragma,
-        }));
+        const db2 = new DeepBase(
+          createSqliteDrizzleDriver({
+            name: `reload-${pragma}`,
+            path: testDataPath,
+            pragma,
+          }),
+        );
         await db2.connect();
         assert.strictEqual(await db2.get('existing'), 'value');
         assert.strictEqual(await db2.get('nested', 'key'), 'data');
@@ -331,17 +344,21 @@ for (const pragma of PRAGMA_MODES) {
       });
     });
 
-    describe('Singleton Pattern', function () {
-      it('should return same instance for same file', function () {
-        const d1 = new SqliteDriver({ name: `singleton-${pragma}`, path: testDataPath, pragma });
-        const d2 = new SqliteDriver({ name: `singleton-${pragma}`, path: testDataPath, pragma });
-        assert.strictEqual(d1, d2);
-      });
-
-      it('should return different instances for different files', function () {
-        const d1 = new SqliteDriver({ name: `file1-${pragma}`, path: testDataPath, pragma });
-        const d2 = new SqliteDriver({ name: `file2-${pragma}`, path: testDataPath, pragma });
+    describe('Driver identity', function () {
+      it('should return different DrizzleDriver instances for different DB files', function () {
+        const d1 = createSqliteDrizzleDriver({
+          name: `file1-${pragma}`,
+          path: testDataPath,
+          pragma,
+        });
+        const d2 = createSqliteDrizzleDriver({
+          name: `file2-${pragma}`,
+          path: testDataPath,
+          pragma,
+        });
         assert.notStrictEqual(d1, d2);
+        d1.client.close();
+        d2.client.close();
       });
     });
 

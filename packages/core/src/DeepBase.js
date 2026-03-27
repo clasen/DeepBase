@@ -176,6 +176,13 @@ export class DeepBase {
     
     return withTimeout(operation(), this.opts.readTimeout, 'get()');
   }
+
+  getSync(...args) {
+    if (!this.drivers || this.drivers.length === 0) {
+      throw new Error('No drivers. Call connect() first or add drivers.');
+    }
+    return this.drivers[0].getSync(...args);
+  }
   
   async set(...args) {
     await this._ensureConnected();

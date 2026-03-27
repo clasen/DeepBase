@@ -77,6 +77,8 @@ Efficiently stores nested objects using a key-value schema:
 - Values are stored as JSON
 - Fast lookups for both exact keys and partial paths
 
+Each row also stores a monotonic `seq` so reads that rebuild objects use `ORDER BY seq, key`. That matches JavaScript insertion order for sibling keys and keeps `shift()` / `pop()` (via `DeepBase.keys()`) aligned with `JsonDriver`. Existing databases pick up `seq` via `ALTER TABLE` on connect (legacy rows default to `0`, then tie-break by `key`).
+
 ### ACID Compliance
 
 SQLite provides:

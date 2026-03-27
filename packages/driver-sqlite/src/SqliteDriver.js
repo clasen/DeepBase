@@ -52,7 +52,7 @@ export class SqliteDriver extends DeepBaseDriver {
     SqliteDriver._instances[this.fileName] = this;
   }
 
-  async connect() {
+  _connectSync() {
     if (this._connected) return;
 
     if (!fs.existsSync(this.path)) {
@@ -75,15 +75,27 @@ export class SqliteDriver extends DeepBaseDriver {
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS deepbase (
         key TEXT PRIMARY KEY,
-        value TEXT NOT NULL
+        value TEXT NOT NULL,
+        seq INTEGER NOT NULL DEFAULT 0
       )${withoutRowid}
     `);
 
+    const tableCols = this.db.prepare('PRAGMA table_info(deepbase)').all();
+    if (!tableCols.some((c) => c.name === 'seq')) {
+      this.db.exec('ALTER TABLE deepbase ADD COLUMN seq INTEGER NOT NULL DEFAULT 0');
+    }
+
     this.getStmt = this.db.prepare('SELECT value FROM deepbase WHERE key = ?');
-    this.setStmt = this.db.prepare('INSERT OR REPLACE INTO deepbase (key, value) VALUES (?, ?)');
+    this.setStmt = this.db.prepare(`
+      INSERT INTO deepbase (key, value, seq)
+      VALUES (?, ?, (SELECT IFNULL(MAX(seq), 0) + 1 FROM deepbase))
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value
+    `);
     this.delStmt = this.db.prepare('DELETE FROM deepbase WHERE key = ?');
-    this.getAllStmt = this.db.prepare('SELECT key, value FROM deepbase');
-    this.getKeysLikeStmt = this.db.prepare("SELECT key, value FROM deepbase WHERE key LIKE ? ESCAPE '!'");
+    this.getAllStmt = this.db.prepare('SELECT key, value FROM deepbase ORDER BY seq, key');
+    this.getKeysLikeStmt = this.db.prepare(
+      "SELECT key, value FROM deepbase WHERE key LIKE ? ESCAPE '!' ORDER BY seq, key",
+    );
     this.delChildrenStmt = this.db.prepare("DELETE FROM deepbase WHERE key LIKE ? ESCAPE '!'");
     this.hasChildrenStmt = this.db.prepare("SELECT 1 FROM deepbase WHERE key LIKE ? ESCAPE '!' LIMIT 1");
 
@@ -116,6 +128,10 @@ export class SqliteDriver extends DeepBaseDriver {
     this._connected = true;
   }
 
+  async connect() {
+    this._connectSync();
+  }
+
   async disconnect() {
     if (this.db) {
       this.db.close();
@@ -125,6 +141,11 @@ export class SqliteDriver extends DeepBaseDriver {
   }
 
   async get(...args) {
+    return this._getSync(args);
+  }
+
+  getSync(...args) {
+    this._connectSync();
     return this._getSync(args);
   }
 

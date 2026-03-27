@@ -203,6 +203,34 @@ describe('DeepBase Core', function() {
     });
   });
 
+  describe('getSync', function() {
+    it('throws when driver does not implement getSync', async function() {
+      const db = new DeepBase(new MockDriver());
+      await db.connect();
+      await db.set('key', 'value');
+      assert.throws(() => db.getSync('key'), /getSync\(\) is not implemented/);
+    });
+
+    it('getSync lazy-connects when using JsonDriver (no connect needed)', async function() {
+      const { JsonDriver } = await import('deepbase-json');
+      const driver = new JsonDriver({ name: 'getSync-lazy-db' });
+      const db = new DeepBase(driver);
+      assert.strictEqual(db.getSync('key'), null);
+      assert.ok(driver._connected);
+    });
+
+    it('returns value when using JsonDriver (sync-capable)', async function() {
+      const { JsonDriver } = await import('deepbase-json');
+      const driver = new JsonDriver({ name: 'getSync-json-test' });
+      const db = new DeepBase(driver);
+      await db.connect();
+      await db.set('key', 'value');
+      assert.strictEqual(db.getSync('key'), 'value');
+      await db.set('nested', 'a', 1);
+      assert.strictEqual(db.getSync('nested', 'a'), 1);
+    });
+  });
+
   describe('Keys with Dots (Base Driver Methods)', function() {
     it('should properly escape and unescape dots in keys', function() {
       const driver = new MockDriver();

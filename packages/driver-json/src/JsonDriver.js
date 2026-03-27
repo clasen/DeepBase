@@ -35,13 +35,13 @@ export class JsonDriver extends DeepBaseDriver {
     JsonDriver._instances[this.fileName] = this;
   }
   
-  async connect() {
+  _connectSync() {
     if (this._connected) return;
-    
+
     if (!fs.existsSync(this.path)) {
       fs.mkdirSync(this.path, { recursive: true });
     }
-    
+
     if (fs.existsSync(this.fileName)) {
       const fileContent = fs.readFileSync(this.fileName, "utf8");
       this.obj = fileContent ? this.parse(fileContent) : {};
@@ -49,8 +49,12 @@ export class JsonDriver extends DeepBaseDriver {
       // Create the file so proper-lockfile can lock it in multiProcess mode
       fs.writeFileSync(this.fileName, this.stringify(this.obj));
     }
-    
+
     this._connected = true;
+  }
+
+  async connect() {
+    this._connectSync();
   }
   
   async disconnect() {
@@ -66,6 +70,17 @@ export class JsonDriver extends DeepBaseDriver {
     const value = this._getRecursive(this.obj, args.slice());
     return typeof value === 'object' && value !== null 
       ? this.parse(this.stringify(value)) 
+      : value;
+  }
+
+  getSync(...args) {
+    if (this.multiProcess) {
+      throw new Error('JsonDriver: getSync() is not supported in multiProcess mode.');
+    }
+    this._connectSync();
+    const value = this._getRecursive(this.obj, args.slice());
+    return typeof value === 'object' && value !== null
+      ? this.parse(this.stringify(value))
       : value;
   }
   

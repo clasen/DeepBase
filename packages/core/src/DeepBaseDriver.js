@@ -21,6 +21,10 @@ export class DeepBaseDriver {
   async get(...args) {
     throw new Error('get() must be implemented by driver');
   }
+
+  getSync(...args) {
+    throw new Error('getSync() is not implemented by this driver');
+  }
   
   async set(...args) {
     throw new Error('set() must be implemented by driver');

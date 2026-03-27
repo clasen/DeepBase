@@ -10,10 +10,15 @@
     "example3": "node 03-migration.js",
     "example4": "node 04-three-tier.js",
     "example5": "node 05-sqlite.js",
-    "example6": "node 06-flatted.js"
+    "example6": "node 06-flatted.js",
+    "example14": "node 14-drizzle-sqlite.js"
   },
   "dependencies": {
     "crypto-js": "^4.2.0",
     "flatted": "^3.3.3"
+  },
+  "devDependencies": {
+    "better-sqlite3": "^11.8.1",
+    "drizzle-orm": "^0.36.4"
   }
 }

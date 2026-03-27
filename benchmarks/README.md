@@ -8,12 +8,17 @@ Comprehensive performance benchmarks for all DeepBase drivers.
 # Run all benchmarks
 npm run bench:all
 
+# Or run the same sequence via one script (from repo root)
+node benchmarks/run-all.js
+
 # Or run individual benchmarks
 npm run bench:json        # JSON driver only
 npm run bench:mongodb     # MongoDB driver only
 npm run bench:redis       # Redis driver (vanilla) only
 npm run bench:redis-json  # Redis-JSON driver only
-npm run bench:compare     # Compare all drivers
+npm run bench:sqlite      # SQLite (better-sqlite3) driver only
+npm run bench:drizzle     # Drizzle ORM + SQLite driver only
+npm run bench:compare     # Compare all drivers (includes Drizzle)
 npm run bench:migration   # Migration performance
 ```
 

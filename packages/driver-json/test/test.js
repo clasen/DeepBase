@@ -68,6 +68,21 @@ describe('JsonDriver', function() {
       const result = await db.get('nonexistent');
       assert.strictEqual(result, null);
     });
+
+    it('getSync returns same value as get (when not multiProcess)', async function() {
+      await db.set('syncKey', 'syncValue');
+      await db.set('syncNested', 'x', 42);
+      const driver = db.getDriver(0);
+      assert.strictEqual(driver.getSync('syncKey'), 'syncValue');
+      assert.strictEqual(driver.getSync('syncNested', 'x'), 42);
+      assert.strictEqual(driver.getSync('nonexistent'), null);
+    });
+
+    it('getSync lazy-connects when not connected', function() {
+      const driver = new JsonDriver({ name: 'getSync-lazy', path: testDataPath });
+      assert.strictEqual(driver.getSync('key'), null);
+      assert.ok(driver._connected);
+    });
   });
 
   describe('Keys with Dots', function() {
@@ -514,6 +529,12 @@ describe('JsonDriver', function() {
       if (fs.existsSync(multiProcessPath)) {
         fs.rmSync(multiProcessPath, { recursive: true, force: true });
       }
+    });
+
+    it('getSync throws in multiProcess mode', async function() {
+      const driver = new JsonDriver({ name: 'mp-getSync', path: multiProcessPath, multiProcess: true });
+      await driver.connect();
+      assert.throws(() => driver.getSync('key'), /getSync\(\) is not supported in multiProcess mode/);
     });
 
     it('should handle concurrent increments from multiple processes', async function() {

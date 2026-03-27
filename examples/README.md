@@ -44,6 +44,12 @@ npm run example4
 ```
 Advanced setup with MongoDB (primary), JSON (backup), and Redis (cache).
 
+### Example 14: Drizzle ORM + SQLite
+```bash
+npm run example14
+```
+(from monorepo root) or `npm run example14` inside `examples/`. Wires `better-sqlite3` + `drizzle-orm/better-sqlite3` into `deepbase-drizzle` with the required `deepbase` table.
+
 ### Example 8: Concurrency-Safe Operations
 ```bash
 node 08-concurrency-safe.js

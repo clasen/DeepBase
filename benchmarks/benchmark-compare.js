@@ -1,6 +1,7 @@
 import DeepBase from '../packages/core/src/index.js';
 import JsonDriver from '../packages/driver-json/src/index.js';
 import SqliteDriver from '../packages/driver-sqlite/src/index.js';
+import { createSqliteDrizzleDriver } from '../packages/driver-drizzle/test/sqlite-fixture.js';
 import MongoDriver from '../packages/driver-mongodb/src/index.js';
 import RedisDriver from '../packages/driver-redis/src/index.js';
 import RedisJsonDriver from '../packages/driver-redis-json/src/index.js';
@@ -122,6 +123,20 @@ async function runComparison() {
   );
   if (results.sqlite) console.log('   ✓ Complete\n');
 
+  // Test Drizzle ORM (SQLite) Driver
+  console.log('🧊 Testing Drizzle ORM (SQLite) Driver...');
+  const drizzlePath = './benchmarks/data-drizzle';
+  results.drizzle = await benchmarkDriver(
+    'Drizzle',
+    createSqliteDrizzleDriver({ name: 'compare', path: drizzlePath, pragma: 'balanced' }),
+    () => {
+      if (fs.existsSync(drizzlePath)) {
+        fs.rmSync(drizzlePath, { recursive: true, force: true });
+      }
+    }
+  );
+  if (results.drizzle) console.log('   ✓ Complete\n');
+
   // Test MongoDB Driver
   console.log('🍃 Testing MongoDB Driver...');
   results.mongodb = await benchmarkDriver(
@@ -162,11 +177,14 @@ async function runComparison() {
   console.log('═══════════════════════════════════════════════════════════\n');
 
   const operations = ['write', 'read', 'increment', 'update', 'delete'];
-  const drivers = ['json', 'sqlite', 'mongodb', 'redis', 'redisjson'];
-  
+  const drivers = ['json', 'sqlite', 'drizzle', 'mongodb', 'redis', 'redisjson'];
+
+  const driverLabel = (d) =>
+    ({ json: 'JSON', sqlite: 'SQLite', drizzle: 'Drizzle', mongodb: 'MongoDB', redis: 'Redis', redisjson: 'RedisJSON' }[d]);
+
   // Print header
-  console.log('Operation      JSON         SQLite       MongoDB      Redis        RedisJSON');
-  console.log('──────────────────────────────────────────────────────────────────────────────────');
+  console.log('Operation      JSON         SQLite       Drizzle      MongoDB      Redis        RedisJSON');
+  console.log('────────────────────────────────────────────────────────────────────────────────────────────────────────');
 
   for (const op of operations) {
     const opName = op.charAt(0).toUpperCase() + op.slice(1);
@@ -198,9 +216,10 @@ async function runComparison() {
     }
     
     if (fastest) {
-      const emoji = fastest === 'json' ? '📁' : 
+      const emoji = fastest === 'json' ? '📁' :
                     fastest === 'sqlite' ? '🗄️' :
-                    fastest === 'mongodb' ? '🍃' : 
+                    fastest === 'drizzle' ? '🧊' :
+                    fastest === 'mongodb' ? '🍃' :
                     fastest === 'redis' ? '⚡' : '📊';
       console.log(`   ${emoji} ${op.toUpperCase().padEnd(12)} → ${fastest.toUpperCase()} (${fastestOps.toFixed(2)} ops/sec)`);
     }
@@ -215,7 +234,7 @@ async function runComparison() {
   
   for (const driver of drivers) {
     if (results[driver] && results[driver].memory) {
-      const driverName = driver.charAt(0).toUpperCase() + driver.slice(1);
+      const driverName = driverLabel(driver);
       const mem = results[driver].memory;
       let line = driverName.padEnd(15);
       line += mem.before.rss.padStart(12);
@@ -242,9 +261,10 @@ async function runComparison() {
   }
   
   if (mostEfficient) {
-    const emoji = mostEfficient === 'json' ? '📁' : 
+    const emoji = mostEfficient === 'json' ? '📁' :
                   mostEfficient === 'sqlite' ? '🗄️' :
-                  mostEfficient === 'mongodb' ? '🍃' : 
+                  mostEfficient === 'drizzle' ? '🧊' :
+                  mostEfficient === 'mongodb' ? '🍃' :
                   mostEfficient === 'redis' ? '⚡' : '📊';
     console.log(`\n💾 Most Memory Efficient: ${emoji} ${mostEfficient.toUpperCase()} (${lowestDelta.toFixed(2)} MB delta)\n`);
   }
