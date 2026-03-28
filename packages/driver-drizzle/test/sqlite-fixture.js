@@ -6,14 +6,7 @@ import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import fs from 'fs';
 import * as pathModule from 'path';
-import { integer, sqliteTable, text } from 'drizzle-orm/sqlite-core';
 import { DrizzleDriver } from '../src/DrizzleDriver.js';
-
-export const deepbaseTable = sqliteTable('deepbase', {
-  key: text('key').primaryKey(),
-  value: text('value').notNull(),
-  seq: integer('seq').notNull().default(0),
-});
 
 const PRAGMA = {
   none: null,
@@ -55,20 +48,8 @@ function applyPragma(sqlite, pragma) {
   return cfg;
 }
 
-function ensureSchema(sqlite, pragma) {
-  const cfg = applyPragma(sqlite, pragma);
-  const withoutRowid = cfg ? ' WITHOUT ROWID' : '';
-  sqlite.exec(`
-    CREATE TABLE IF NOT EXISTS deepbase (
-      key TEXT PRIMARY KEY,
-      value TEXT NOT NULL,
-      seq INTEGER NOT NULL DEFAULT 0
-    )${withoutRowid}
-  `);
-  const tableCols = sqlite.prepare('PRAGMA table_info(deepbase)').all();
-  if (!tableCols.some((c) => c.name === 'seq')) {
-    sqlite.exec('ALTER TABLE deepbase ADD COLUMN seq INTEGER NOT NULL DEFAULT 0');
-  }
+function configureSqlite(sqlite, pragma) {
+  applyPragma(sqlite, pragma);
 }
 
 /**
@@ -83,7 +64,7 @@ function makeReopen(opts) {
     }
     const fileName = pathModule.join(resolved, `${name}.db`);
     const sqlite = new Database(fileName);
-    ensureSchema(sqlite, pragma);
+    configureSqlite(sqlite, pragma);
     const db = drizzle({ client: sqlite });
     return { db, client: sqlite };
   };
@@ -98,7 +79,6 @@ export function createSqliteDrizzleDriver(opts) {
   const first = reopen();
   return new DrizzleDriver({
     db: first.db,
-    table: deepbaseTable,
     client: first.client,
     reopen,
   });

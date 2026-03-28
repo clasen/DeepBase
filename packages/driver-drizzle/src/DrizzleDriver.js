@@ -1,37 +1,89 @@
 import { DeepBaseDriver } from 'deepbase';
 import { asc, eq, sql } from 'drizzle-orm';
+import { integer as pgInteger, pgTable, text as pgText } from 'drizzle-orm/pg-core';
+import { int as mysqlInt, mysqlTable, text as mysqlText, varchar as mysqlVarchar } from 'drizzle-orm/mysql-core';
+import { integer as sqliteInteger, sqliteTable, text as sqliteText } from 'drizzle-orm/sqlite-core';
+
+function resolveDialectName(db) {
+  return db?.dialect?.constructor?.name ?? 'UnknownDialect';
+}
+
+function createDefaultTable(dialectName, tableName) {
+  const normalizedName = typeof tableName === 'string' && tableName.trim()
+    ? tableName.trim()
+    : 'deepbase_main';
+
+  if (/mysql/i.test(dialectName)) {
+    return mysqlTable(normalizedName, {
+      key: mysqlVarchar('key', { length: 512 }).primaryKey(),
+      value: mysqlText('value').notNull(),
+      seq: mysqlInt('seq').notNull().default(0),
+    });
+  }
+
+  if (/pg|postgres/i.test(dialectName)) {
+    return pgTable(normalizedName, {
+      key: pgText('key').primaryKey(),
+      value: pgText('value').notNull(),
+      seq: pgInteger('seq').notNull().default(0),
+    });
+  }
+
+  if (/sqlite|libsql|turso/i.test(dialectName)) {
+    return sqliteTable(normalizedName, {
+      key: sqliteText('key').primaryKey(),
+      value: sqliteText('value').notNull(),
+      seq: sqliteInteger('seq').notNull().default(0),
+    });
+  }
+
+  throw new Error(
+    `DrizzleDriver could not infer default table for dialect "${dialectName}". Provide table explicitly.`,
+  );
+}
 
 /**
  * DeepBase driver backed by a user-supplied Drizzle ORM instance.
  * The SQL dialect and client (SQLite, PostgreSQL, MySQL, etc.) are chosen when constructing `db` outside this package.
  *
- * `table` must expose columns: `key` (primary key, text-like), `value` (text-like JSON payload), `seq` (integer, insert order).
- * You are responsible for migrations / CREATE TABLE matching your dialect.
+ * If `table` is omitted, the driver creates a default Drizzle table schema named `deepbase_main`
+ * (or the provided `tableName`) for sqlite/postgres/mysql dialects.
+ * The physical table is auto-created on connect by default.
  */
 export class DrizzleDriver extends DeepBaseDriver {
   /**
    * @param {object} opts
    * @param {object} opts.db - Drizzle database (e.g. drizzle({ client }) from your dialect entrypoint)
-   * @param {object} opts.table - Drizzle table with `.key`, `.value`, `.seq` columns
+   * @param {object} [opts.table] - Optional Drizzle table with `.key`, `.value`, `.seq` columns
+   * @param {string} [opts.tableName='deepbase_main'] - Used only when `table` is omitted
    * @param {object} [opts.client] - Underlying driver handle; if it has `.close()`, it is called on disconnect() unless onDisconnect is set
    * @param {() => void | Promise<void>} [opts.onDisconnect] - Overrides default disconnect behavior when set
    * @param {() => { db: object, client?: object } | Promise<{ db: object, client?: object }>} [opts.reopen] - After disconnect, connect() calls this to obtain a new db (and optional client), e.g. reopen a file pool
+   * @param {boolean | ((ctx: { db: object, table: object, dialect: string }) => void | Promise<void>)} [opts.ensureTable=true]
+   * - true: create `key/value/seq` table automatically if missing (default)
+   * - false: skip auto-create
+   * - function: custom ensure logic per dialect
    */
-  constructor({ db, table, client, onDisconnect, reopen, ...opts } = {}) {
+  constructor({ db, table, tableName = 'deepbase_main', client, onDisconnect, reopen, ensureTable = true, ...opts } = {}) {
     super(opts);
 
     if (!db) {
       throw new Error('DrizzleDriver requires db (drizzle instance)');
     }
-    if (!table || !table.key || !table.value || !table.seq) {
+
+    const resolvedTable = table ?? createDefaultTable(resolveDialectName(db), tableName);
+
+    if (!resolvedTable || !resolvedTable.key || !resolvedTable.value || !resolvedTable.seq) {
       throw new Error('DrizzleDriver requires table with key, value, and seq columns');
     }
 
     this.drizzle = db;
-    this.table = table;
+    this.table = resolvedTable;
     this.client = client ?? null;
     this.onDisconnect = onDisconnect ?? null;
     this.reopen = reopen ?? null;
+    this.ensureTable = ensureTable;
+    this._schemaEnsured = false;
   }
 
   _ensureReady() {
@@ -55,6 +107,131 @@ export class DrizzleDriver extends DeepBaseDriver {
       this._delRow(tx, key);
       this._deleteLike(tx, likePattern);
     });
+  }
+
+  _dialectName() {
+    return this.drizzle?.dialect?.constructor?.name ?? 'UnknownDialect';
+  }
+
+  _getTableName() {
+    const symbols = Object.getOwnPropertySymbols(this.table);
+    const nameSymbol = symbols.find((s) => s.description === 'drizzle:Name');
+    const tableName = nameSymbol ? this.table[nameSymbol] : null;
+    if (!tableName || typeof tableName !== 'string') {
+      throw new Error('DrizzleDriver could not resolve table name from schema');
+    }
+    return tableName;
+  }
+
+  _quoteIdent(ident, dialectName) {
+    if (/mysql|singlestore/i.test(dialectName)) {
+      return `\`${String(ident).replace(/`/g, '``')}\``;
+    }
+    if (/mssql/i.test(dialectName)) {
+      return `[${String(ident).replace(/]/g, ']]')}]`;
+    }
+    return `"${String(ident).replace(/"/g, '""')}"`;
+  }
+
+  _buildCreateTableSql() {
+    const dialect = this._dialectName();
+    const tableName = this._quoteIdent(this._getTableName(), dialect);
+    const keyCol = this._quoteIdent(this.table.key?.name ?? 'key', dialect);
+    const valueCol = this._quoteIdent(this.table.value?.name ?? 'value', dialect);
+    const seqCol = this._quoteIdent(this.table.seq?.name ?? 'seq', dialect);
+
+    if (/mysql|singlestore/i.test(dialect)) {
+      return `CREATE TABLE IF NOT EXISTS ${tableName} (${keyCol} VARCHAR(512) PRIMARY KEY, ${valueCol} LONGTEXT NOT NULL, ${seqCol} BIGINT NOT NULL DEFAULT 0)`;
+    }
+    if (/mssql/i.test(dialect)) {
+      return `IF OBJECT_ID(N'${this._getTableName()}', N'U') IS NULL CREATE TABLE ${tableName} (${keyCol} NVARCHAR(450) NOT NULL PRIMARY KEY, ${valueCol} NVARCHAR(MAX) NOT NULL, ${seqCol} BIGINT NOT NULL DEFAULT 0)`;
+    }
+    return `CREATE TABLE IF NOT EXISTS ${tableName} (${keyCol} TEXT PRIMARY KEY, ${valueCol} TEXT NOT NULL, ${seqCol} INTEGER NOT NULL DEFAULT 0)`;
+  }
+
+  _buildAlterSeqSql() {
+    const dialect = this._dialectName();
+    const tableName = this._quoteIdent(this._getTableName(), dialect);
+    const seqCol = this._quoteIdent(this.table.seq?.name ?? 'seq', dialect);
+
+    if (/mysql|singlestore/i.test(dialect)) {
+      return `ALTER TABLE ${tableName} ADD COLUMN ${seqCol} BIGINT NOT NULL DEFAULT 0`;
+    }
+    if (/mssql/i.test(dialect)) {
+      return `ALTER TABLE ${tableName} ADD ${seqCol} BIGINT NOT NULL DEFAULT 0`;
+    }
+    return `ALTER TABLE ${tableName} ADD COLUMN ${seqCol} INTEGER NOT NULL DEFAULT 0`;
+  }
+
+  _isDuplicateColumnError(error) {
+    const msg = String(error?.message ?? '').toLowerCase();
+    const causeMsg = String(error?.cause?.message ?? '').toLowerCase();
+    const full = `${msg} ${causeMsg}`;
+    return (
+      full.includes('duplicate column') ||
+      full.includes('already exists') ||
+      full.includes('column exists')
+    );
+  }
+
+  _executeRaw(sqlText) {
+    if (typeof this.drizzle?.execute === 'function') {
+      return this.drizzle.execute(sql.raw(sqlText));
+    }
+    if (typeof this.drizzle?.run === 'function') {
+      return this.drizzle.run(sql.raw(sqlText));
+    }
+    if (this.client && typeof this.client.exec === 'function') {
+      return this.client.exec(sqlText);
+    }
+    if (this.client && typeof this.client.query === 'function') {
+      return this.client.query(sqlText);
+    }
+    throw new Error('DrizzleDriver cannot execute raw SQL for ensureTable');
+  }
+
+  async _ensureTableIfNeeded() {
+    if (this._schemaEnsured) return;
+    if (this.ensureTable === false) {
+      this._schemaEnsured = true;
+      return;
+    }
+
+    if (typeof this.ensureTable === 'function') {
+      await Promise.resolve(
+        this.ensureTable({
+          db: this.drizzle,
+          table: this.table,
+          dialect: this._dialectName(),
+        }),
+      );
+      this._schemaEnsured = true;
+      return;
+    }
+
+    await Promise.resolve(this._executeRaw(this._buildCreateTableSql()));
+    try {
+      await Promise.resolve(this._executeRaw(this._buildAlterSeqSql()));
+    } catch (error) {
+      if (!this._isDuplicateColumnError(error)) {
+        throw error;
+      }
+    }
+    this._schemaEnsured = true;
+  }
+
+  _ensureTableForSyncAccess() {
+    if (this._schemaEnsured) return;
+    if (this.ensureTable !== true) return;
+    this._executeRaw(this._buildCreateTableSql());
+    try {
+      this._executeRaw(this._buildAlterSeqSql());
+    } catch (error) {
+      if (!this._isDuplicateColumnError(error)) {
+        throw error;
+      }
+    }
+    this._schemaEnsured = true;
   }
 
   _updTxn(keys, func) {
@@ -130,8 +307,10 @@ export class DrizzleDriver extends DeepBaseDriver {
       const r = await Promise.resolve(this.reopen());
       this.drizzle = r.db;
       this.client = r.client ?? null;
+      this._schemaEnsured = false;
     }
     this._ensureReady();
+    await this._ensureTableIfNeeded();
     this._connected = true;
   }
 
@@ -154,6 +333,7 @@ export class DrizzleDriver extends DeepBaseDriver {
 
   getSync(...args) {
     this._ensureReady();
+    this._ensureTableForSyncAccess();
     this._connected = true;
     return this._getSync(args);
   }

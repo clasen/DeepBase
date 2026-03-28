@@ -48,7 +48,7 @@ Advanced setup with MongoDB (primary), JSON (backup), and Redis (cache).
 ```bash
 npm run example14
 ```
-(from monorepo root) or `npm run example14` inside `examples/`. Wires `better-sqlite3` + `drizzle-orm/better-sqlite3` into `deepbase-drizzle` with the required `deepbase` table.
+(from monorepo root) or `npm run example14` inside `examples/`. Wires `better-sqlite3` + `drizzle-orm/better-sqlite3` into `deepbase-drizzle`; the driver infers a default schema and creates the physical table automatically on `connect()`.
 
 ### Example 8: Concurrency-Safe Operations
 ```bash

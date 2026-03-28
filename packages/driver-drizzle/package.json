@@ -14,14 +14,12 @@
     }
   },
   "peerDependencies": {
-    "deepbase": "^3.6.0",
-    "drizzle-orm": "^0.36.0"
+    "deepbase": "^3.6.0"
   },
   "scripts": {
     "test": "mocha test/test.js"
   },
   "devDependencies": {
-    "drizzle-orm": "^0.36.4",
     "mocha": "^10.8.2"
   },
   "repository": {
@@ -43,5 +41,8 @@
   "bugs": {
     "url": "https://github.com/clasen/DeepBase/issues"
   },
-  "homepage": "https://github.com/clasen/DeepBase/tree/main/packages/driver-drizzle"
+  "homepage": "https://github.com/clasen/DeepBase/tree/main/packages/driver-drizzle",
+  "dependencies": {
+    "drizzle-orm": "^0.36.0"
+  }
 }

@@ -57,9 +57,30 @@ const alice = await db.get('users', 'alice');
 The JSON driver (`deepbase-json`) is included automatically. Install additional drivers as needed:
 
 - [`deepbase-sqlite`](https://www.npmjs.com/package/deepbase-sqlite) - SQLite embedded database
+- [`deepbase-indexeddb`](https://www.npmjs.com/package/deepbase-indexeddb) - IndexedDB for browser environments
+- [`deepbase-drizzle`](https://www.npmjs.com/package/deepbase-drizzle) - [Drizzle ORM](https://orm.drizzle.team/) — SQLite, PostgreSQL, MySQL, and other dialects via your Drizzle `db` (default table schema is inferred)
 - [`deepbase-mongodb`](https://www.npmjs.com/package/deepbase-mongodb) - MongoDB storage
 - [`deepbase-redis`](https://www.npmjs.com/package/deepbase-redis) - Redis Stack storage
-- [`deepbase-indexeddb`](https://www.npmjs.com/package/deepbase-indexeddb) - IndexedDB for browser environments
+
+### Drizzle Example (PostgreSQL / MySQL / Supabase)
+
+```javascript
+import DeepBase from 'deepbase';
+import DrizzleDriver from 'deepbase-drizzle';
+import { drizzle } from 'drizzle-orm/node-postgres';
+import { Pool } from 'pg';
+
+const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+const db = drizzle({ client: pool });
+
+const store = new DeepBase(new DrizzleDriver({ db, client: pool }));
+await store.connect(); // creates table automatically if it does not exist
+await store.set('users', 'alice', { name: 'Alice' });
+```
+
+Same pattern works with other Drizzle dialects (`mysql2`, SQLite, etc.).  
+For Supabase Postgres, use the Supabase connection string in `DATABASE_URL`.  
+Optional: set `tableName` if you want a different table than `deepbase_main`.
 
 ### Multi-Driver Example
 
