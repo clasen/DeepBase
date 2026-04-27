@@ -177,6 +177,8 @@ new DeepBase(drivers, options)
 
 #### Query Operations
 - `await db.keys(...path)` - Get keys at path
+- `await db.first(...path)` - Get the first key at path (same driver read order as `get()`)
+- `await db.last(...path)` - Get the last key at path (same driver read order as `get()`)
 - `await db.values(...path)` - Get values at path
 - `await db.entries(...path)` - Get entries at path
 - `await db.len(...path)` - Count the number of keys at path
@@ -264,8 +266,12 @@ class MyDriver extends DeepBaseDriver {
   async dec(...args) { /* ... */ }
   async add(...args) { /* ... */ }
   async upd(...args) { /* ... */ }
+  async first(...args) { /* optional optimization; fallback exists in base class */ }
+  async last(...args) { /* optional optimization; fallback exists in base class */ }
 }
 ```
+
+`DeepBase.first()` / `DeepBase.last()` delegate to each driver's `first()` / `last()` and follow the same read policy as `get()` (`readFirst` order or `Promise.any` mode). `shift()` / `pop()` use these methods, and drivers without overrides still work through the base fallback to `keys()`.
 
 ## 🔐 Extending DeepBase with Encryption
 

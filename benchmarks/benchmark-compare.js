@@ -8,6 +8,7 @@ import RedisJsonDriver from '../packages/driver-redis-json/src/index.js';
 import fs from 'fs';
 
 const ITERATIONS = 500;
+const QUEUE_STACK_ITERATIONS = 200;
 
 function getMemoryUsage() {
   const used = process.memoryUsage();
@@ -71,6 +72,28 @@ async function benchmarkDriver(name, driver, cleanup) {
     await db.del('items', `item_${i}`);
   }
   results.delete = 100 / ((performance.now() - delStart) / 1000);
+
+  // Stack test (add + pop)
+  await db.del('stack');
+  const stackStart = performance.now();
+  for (let i = 0; i < QUEUE_STACK_ITERATIONS; i++) {
+    await db.add('stack', { id: i });
+  }
+  for (let i = 0; i < QUEUE_STACK_ITERATIONS; i++) {
+    await db.pop('stack');
+  }
+  results.stack = (QUEUE_STACK_ITERATIONS * 2) / ((performance.now() - stackStart) / 1000);
+
+  // Queue test (add + shift)
+  await db.del('queue');
+  const queueStart = performance.now();
+  for (let i = 0; i < QUEUE_STACK_ITERATIONS; i++) {
+    await db.add('queue', { id: i });
+  }
+  for (let i = 0; i < QUEUE_STACK_ITERATIONS; i++) {
+    await db.shift('queue');
+  }
+  results.queue = (QUEUE_STACK_ITERATIONS * 2) / ((performance.now() - queueStart) / 1000);
 
   // Memory after all operations
   const memoryAfter = getMemoryUsage();
@@ -176,7 +199,7 @@ async function runComparison() {
   console.log('  COMPARISON RESULTS (ops/sec)');
   console.log('═══════════════════════════════════════════════════════════\n');
 
-  const operations = ['write', 'read', 'increment', 'update', 'delete'];
+  const operations = ['write', 'read', 'increment', 'update', 'delete', 'stack', 'queue'];
   const drivers = ['json', 'sqlite', 'drizzle', 'mongodb', 'redis', 'redisjson'];
 
   const driverLabel = (d) =>

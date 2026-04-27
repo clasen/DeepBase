@@ -18,53 +18,72 @@ function getMemoryUsage() {
 
 async function benchmarkMigration(fromName, toName, fromDriver, toDriver, dataSize) {
   const db = new DeepBase([fromDriver, toDriver]);
+  let connectedStats;
   
   try {
-    await db.connect();
+    connectedStats = await db.connect();
   } catch (error) {
-    console.log(`   ⚠️  ${fromName} or ${toName}: Not available`);
+    await db.disconnect();
+    console.log(`   ⚠️  ${fromName} or ${toName}: unavailable (${error.message})`);
     return null;
   }
 
-  // Populate source driver
-  const source = db.getDriver(0);
-  await source.del();
-  
-  for (let i = 0; i < dataSize; i++) {
-    await source.set('items', `item_${i}`, {
-      id: i,
-      name: `Item ${i}`,
-      description: `Description for item ${i}`,
-      timestamp: Date.now(),
-      tags: ['tag1', 'tag2', 'tag3'],
-      metadata: {
-        created: Date.now(),
-        updated: Date.now(),
-        version: 1
-      }
-    });
+  // DeepBase can connect partially (e.g. JSON ok, Mongo/Redis down).
+  // If either side of migration is unavailable, skip scenario gracefully.
+  if (connectedStats.connected < connectedStats.total) {
+    const unavailable = [];
+    if (!fromDriver._connected) unavailable.push(fromName);
+    if (!toDriver._connected) unavailable.push(toName);
+    const unavailableLabel = unavailable.length > 0 ? unavailable.join(' and ') : `${fromName} or ${toName}`;
+    console.log(`   ⚠️  ${unavailableLabel}: unavailable, benchmark skipped`);
+    await db.disconnect();
+    return null;
   }
 
-  // Benchmark migration
-  const memBefore = getMemoryUsage();
-  const start = performance.now();
-  const result = await db.migrate(0, 1, { clear: true });
-  const time = performance.now() - start;
-  const memAfter = getMemoryUsage();
-  
-  await db.disconnect();
-
-  return {
-    items: result.migrated,
-    time: time,
-    throughput: result.migrated / (time / 1000),
-    memory: {
-      before: memBefore,
-      after: memAfter,
-      rssDelta: (parseFloat(memAfter.rss) - parseFloat(memBefore.rss)).toFixed(2),
-      heapDelta: (parseFloat(memAfter.heapUsed) - parseFloat(memBefore.heapUsed)).toFixed(2)
+  try {
+    // Populate source driver
+    const source = db.getDriver(0);
+    await source.del();
+    
+    for (let i = 0; i < dataSize; i++) {
+      await source.set('items', `item_${i}`, {
+        id: i,
+        name: `Item ${i}`,
+        description: `Description for item ${i}`,
+        timestamp: Date.now(),
+        tags: ['tag1', 'tag2', 'tag3'],
+        metadata: {
+          created: Date.now(),
+          updated: Date.now(),
+          version: 1
+        }
+      });
     }
-  };
+
+    // Benchmark migration
+    const memBefore = getMemoryUsage();
+    const start = performance.now();
+    const result = await db.migrate(0, 1, { clear: true });
+    const time = performance.now() - start;
+    const memAfter = getMemoryUsage();
+
+    return {
+      items: result.migrated,
+      time: time,
+      throughput: result.migrated / (time / 1000),
+      memory: {
+        before: memBefore,
+        after: memAfter,
+        rssDelta: (parseFloat(memAfter.rss) - parseFloat(memBefore.rss)).toFixed(2),
+        heapDelta: (parseFloat(memAfter.heapUsed) - parseFloat(memBefore.heapUsed)).toFixed(2)
+      }
+    };
+  } catch (error) {
+    console.log(`   ⚠️  ${fromName} → ${toName}: benchmark skipped (${error.message})`);
+    return null;
+  } finally {
+    await db.disconnect();
+  }
 }
 
 async function runMigrationBenchmarks() {

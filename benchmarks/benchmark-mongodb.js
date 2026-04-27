@@ -31,9 +31,9 @@ async function benchmark() {
     await db.connect();
     console.log('✅ Connected to MongoDB\n');
   } catch (error) {
-    console.error('❌ Could not connect to MongoDB:', error.message);
-    console.log('💡 Make sure MongoDB is running: docker start mongodb\n');
-    process.exit(1);
+    console.warn(`⚠️  MongoDB is unavailable, benchmark skipped: ${error.message}`);
+    console.log('💡 To run it: docker start mongodb\n');
+    return;
   }
 
   // Clear existing data

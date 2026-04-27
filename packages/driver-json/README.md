@@ -233,6 +233,8 @@ new DeepBase(drivers, options)
 - `await db.add(...path, value)` - Add item with auto-generated ID
 - `await db.upd(...path, fn)` - Update value with function
 - `await db.keys(...path)` - Get keys at path
+- `await db.first(...path)` - Get first key at path (same order as `keys()`)
+- `await db.last(...path)` - Get last key at path (same order as `keys()`)
 - `await db.values(...path)` - Get values at path
 - `await db.entries(...path)` - Get entries at path
 

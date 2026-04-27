@@ -30,9 +30,9 @@ async function benchmark() {
     await db.connect();
     console.log('✅ Connected to Redis Stack (with RedisJSON)\n');
   } catch (error) {
-    console.error('❌ Could not connect to Redis:', error.message);
-    console.log('💡 Make sure Redis Stack is running: docker start redis-stack-server-6379\n');
-    process.exit(1);
+    console.warn(`⚠️  Redis/RedisJSON is unavailable, benchmark skipped: ${error.message}`);
+    console.log('💡 To run it: docker start redis-stack-server-6379\n');
+    return;
   }
 
   // Clear existing data

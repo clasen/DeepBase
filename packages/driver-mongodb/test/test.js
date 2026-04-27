@@ -5,11 +5,52 @@ import { MongoDriver } from '../src/MongoDriver.js';
 describe('MongoDriver', function() {
   let db;
   let testCounter = 0;
+  let mongoAvailable = true;
+  let mongoSkipReason = '';
+
+  async function withTimeout(promise, timeoutMs, message) {
+    let timeoutId;
+    const timeoutPromise = new Promise((_, reject) => {
+      timeoutId = setTimeout(() => reject(new Error(message)), timeoutMs);
+    });
+
+    try {
+      return await Promise.race([promise, timeoutPromise]);
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
 
   // Increase timeout for MongoDB operations
   this.timeout(10000);
 
+  before(async function() {
+    const probeDb = new DeepBase(new MongoDriver({
+      url: 'mongodb://localhost:27017',
+      database: 'deepbase_test',
+      collection: '__availability_probe__'
+    }));
+
+    try {
+      await withTimeout(
+        probeDb.connect(),
+        3000,
+        'Timeout while probing MongoDB availability'
+      );
+      await probeDb.disconnect();
+    } catch (error) {
+      mongoAvailable = false;
+      mongoSkipReason = error?.message || 'Unknown MongoDB connection error';
+      console.warn(`[deepbase-mongodb:test] MongoDB is unavailable, skipping tests: ${mongoSkipReason}`);
+    }
+  });
+
   beforeEach(async function() {
+    if (!mongoAvailable) {
+      this.skip();
+      return;
+    }
+
     testCounter++;
     db = new DeepBase(new MongoDriver({ 
       url: 'mongodb://localhost:27017',
@@ -20,7 +61,7 @@ describe('MongoDriver', function() {
     try {
       await db.connect();
     } catch (error) {
-      this.skip(); // Skip tests if MongoDB is not available
+      this.skip();
     }
   });
 
@@ -237,6 +278,19 @@ describe('MongoDriver', function() {
       assert.strictEqual(entries.length, 2);
       assert.ok(entries.some(([k, v]) => k === 'alice' && v.age === 30));
       assert.ok(entries.some(([k, v]) => k === 'bob' && v.age === 25));
+    });
+
+    it('first/last should match keys() boundaries', async function() {
+      const keys = await db.keys('users');
+      const driver = db.getDriver(0);
+      assert.strictEqual(await driver.first('users'), keys[0]);
+      assert.strictEqual(await driver.last('users'), keys[keys.length - 1]);
+    });
+
+    it('first/last should return undefined for missing path', async function() {
+      const driver = db.getDriver(0);
+      assert.strictEqual(await driver.first('missing'), undefined);
+      assert.strictEqual(await driver.last('missing'), undefined);
     });
   });
 

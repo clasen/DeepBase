@@ -11,7 +11,7 @@ export class JsonDriver extends DeepBaseDriver {
     super(opts);
     
     this.name = name || "default";
-    this.path = path || new URL('../../../db', import.meta.url).pathname;
+    this.path = path || pathModule.join(process.cwd(), 'db');
     this.stringify = stringify || ((obj) => JSON.stringify(obj, null, 4));
     this.parse = parse || JSON.parse;
     this.multiProcess = multiProcess || false;
@@ -147,6 +147,45 @@ export class JsonDriver extends DeepBaseDriver {
       await this._setInternal(...args, newValue);
       return args;
     });
+  }
+
+  async first(...args) {
+    if (this.multiProcess) {
+      this._refreshFromDisk();
+    }
+
+    const value = this._getRecursive(this.obj, args.slice());
+    if (value === null || typeof value !== 'object') {
+      return undefined;
+    }
+
+    for (const key in value) {
+      if (Object.prototype.hasOwnProperty.call(value, key)) {
+        return key;
+      }
+    }
+
+    return undefined;
+  }
+
+  async last(...args) {
+    if (this.multiProcess) {
+      this._refreshFromDisk();
+    }
+
+    const value = this._getRecursive(this.obj, args.slice());
+    if (value === null || typeof value !== 'object') {
+      return undefined;
+    }
+
+    let last;
+    for (const key in value) {
+      if (Object.prototype.hasOwnProperty.call(value, key)) {
+        last = key;
+      }
+    }
+
+    return last;
   }
   
   // Internal set without queuing (for use within queued operations)

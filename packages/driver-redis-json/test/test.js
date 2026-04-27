@@ -5,11 +5,34 @@ import { RedisDriver } from '../src/RedisDriver.js';
 describe('RedisDriver', function() {
   let db;
   let testCounter = 0;
+  let redisAvailable = true;
+  let redisSkipReason = '';
 
   // Increase timeout for Redis operations
   this.timeout(10000);
 
+  before(async function() {
+    const probeDb = new DeepBase(new RedisDriver({
+      url: 'redis://localhost:6379',
+      prefix: '__availability_probe__'
+    }));
+
+    try {
+      await probeDb.connect();
+      await probeDb.disconnect();
+    } catch (error) {
+      redisAvailable = false;
+      redisSkipReason = error?.message || 'Unknown Redis connection error';
+      console.warn(`[deepbase-redis-json:test] Redis/RedisJSON is unavailable, skipping tests: ${redisSkipReason}`);
+    }
+  });
+
   beforeEach(async function() {
+    if (!redisAvailable) {
+      this.skip();
+      return;
+    }
+
     testCounter++;
     db = new DeepBase(new RedisDriver({ 
       url: 'redis://localhost:6379',
@@ -19,7 +42,7 @@ describe('RedisDriver', function() {
     try {
       await db.connect();
     } catch (error) {
-      this.skip(); // Skip tests if Redis is not available
+      this.skip();
     }
   });
 
@@ -313,6 +336,19 @@ describe('RedisDriver', function() {
       assert.strictEqual(entries.length, 2);
       assert.ok(entries.some(([k, v]) => k === 'alice' && v.age === 30));
       assert.ok(entries.some(([k, v]) => k === 'bob' && v.age === 25));
+    });
+
+    it('first/last should match keys() boundaries', async function() {
+      const keys = await db.keys('users');
+      const driver = db.getDriver(0);
+      assert.strictEqual(await driver.first('users'), keys[0]);
+      assert.strictEqual(await driver.last('users'), keys[keys.length - 1]);
+    });
+
+    it('first/last should return undefined for missing path', async function() {
+      const driver = db.getDriver(0);
+      assert.strictEqual(await driver.first('missing'), undefined);
+      assert.strictEqual(await driver.last('missing'), undefined);
     });
   });
 

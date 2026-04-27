@@ -62,6 +62,16 @@ export class DeepBaseDriver {
     const r = await this.get(...args);
     return (r !== null && typeof r === "object") ? Object.keys(r) : [];
   }
+
+  async first(...args) {
+    const keys = await this.keys(...args);
+    return keys[0];
+  }
+
+  async last(...args) {
+    const keys = await this.keys(...args);
+    return keys[keys.length - 1];
+  }
   
   async values(...args) {
     const r = await this.get(...args);

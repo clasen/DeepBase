@@ -302,6 +302,37 @@ export class RedisDriver extends DeepBaseDriver {
     const func = args.pop();
     return this.set(...args, func(await this.get(...args)));
   }
+
+  async first(...args) {
+    const value = await this.get(...args);
+    if (value === null || typeof value !== 'object') {
+      return undefined;
+    }
+
+    for (const key in value) {
+      if (Object.prototype.hasOwnProperty.call(value, key)) {
+        return key;
+      }
+    }
+
+    return undefined;
+  }
+
+  async last(...args) {
+    const value = await this.get(...args);
+    if (value === null || typeof value !== 'object') {
+      return undefined;
+    }
+
+    let last;
+    for (const key in value) {
+      if (Object.prototype.hasOwnProperty.call(value, key)) {
+        last = key;
+      }
+    }
+
+    return last;
+  }
   
   async _set(redisKey, pathParts, value) {
     if (value === undefined) {

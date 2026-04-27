@@ -206,6 +206,45 @@ export class IndexedDBDriver extends DeepBaseDriver {
       return shiftedValue;
     });
   }
+
+  async first(...args) {
+    if (!this._connected) {
+      throw new Error('Database not connected. Call connect() first.');
+    }
+
+    const value = await this.get(...args);
+    if (value === null || typeof value !== 'object') {
+      return undefined;
+    }
+
+    for (const key in value) {
+      if (Object.prototype.hasOwnProperty.call(value, key)) {
+        return key;
+      }
+    }
+
+    return undefined;
+  }
+
+  async last(...args) {
+    if (!this._connected) {
+      throw new Error('Database not connected. Call connect() first.');
+    }
+
+    const value = await this.get(...args);
+    if (value === null || typeof value !== 'object') {
+      return undefined;
+    }
+
+    let last;
+    for (const key in value) {
+      if (Object.prototype.hasOwnProperty.call(value, key)) {
+        last = key;
+      }
+    }
+
+    return last;
+  }
   
   // Internal method to set without queuing
   async _setInternal(...args) {

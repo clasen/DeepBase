@@ -38,7 +38,7 @@ export class SqliteDriver extends DeepBaseDriver {
     super(opts);
 
     this.name = name || 'default';
-    this.path = path || new URL('../../../db', import.meta.url).pathname;
+    this.path = path || pathModule.join(process.cwd(), 'db');
     this.pragma = pragma || 'balanced';
 
     this.path = pathModule.resolve(this.path);
@@ -59,7 +59,23 @@ export class SqliteDriver extends DeepBaseDriver {
       fs.mkdirSync(this.path, { recursive: true });
     }
 
-    this.db = new Database(this.fileName);
+    try {
+      this.db = new Database(this.fileName);
+    } catch (err) {
+      if (this._isMissingNativeBinding(err)) {
+        const hint =
+          'deepbase-sqlite: the native binding for "better-sqlite3" is missing. ' +
+          'This usually means npm install scripts were disabled (e.g. `ignore-scripts=true` in your .npmrc). ' +
+          'Fix it with: `npm rebuild better-sqlite3 --ignore-scripts=false`, ' +
+          'or reinstall with `npm i --ignore-scripts=false`. ' +
+          'See https://github.com/clasen/DeepBase/tree/main/packages/driver-sqlite#troubleshooting';
+        const wrapped = new Error(hint);
+        wrapped.cause = err;
+        wrapped.code = 'DEEPBASE_SQLITE_BINDING_MISSING';
+        throw wrapped;
+      }
+      throw err;
+    }
 
     const cfg = PRAGMA[this.pragma];
     if (cfg) {
@@ -95,6 +111,12 @@ export class SqliteDriver extends DeepBaseDriver {
     this.getAllStmt = this.db.prepare('SELECT key, value FROM deepbase ORDER BY seq, key');
     this.getKeysLikeStmt = this.db.prepare(
       "SELECT key, value FROM deepbase WHERE key LIKE ? ESCAPE '!' ORDER BY seq, key",
+    );
+    this.getFirstChildKeyStmt = this.db.prepare(
+      "SELECT key FROM deepbase WHERE key LIKE ? ESCAPE '!' ORDER BY seq, key LIMIT 1",
+    );
+    this.getLastChildKeyStmt = this.db.prepare(
+      "SELECT key FROM deepbase WHERE key LIKE ? ESCAPE '!' ORDER BY seq DESC, key DESC LIMIT 1",
     );
     this.delChildrenStmt = this.db.prepare("DELETE FROM deepbase WHERE key LIKE ? ESCAPE '!'");
     this.hasChildrenStmt = this.db.prepare("SELECT 1 FROM deepbase WHERE key LIKE ? ESCAPE '!' LIMIT 1");
@@ -226,6 +248,46 @@ export class SqliteDriver extends DeepBaseDriver {
     return this._updTxn(keys, func);
   }
 
+  async first(...args) {
+    return this._firstOrLastKey(args, false);
+  }
+
+  async last(...args) {
+    return this._firstOrLastKey(args, true);
+  }
+
+  _firstOrLastKey(path, fromEnd) {
+    const nestedKey = this._findBoundaryNestedKey(path, fromEnd);
+    if (nestedKey !== undefined) {
+      return nestedKey;
+    }
+
+    const value = this._getSync(path);
+    if (value === null || typeof value !== 'object') {
+      return undefined;
+    }
+
+    let keyResult;
+    for (const key in value) {
+      if (Object.prototype.hasOwnProperty.call(value, key)) {
+        if (!fromEnd) return key;
+        keyResult = key;
+      }
+    }
+    return keyResult;
+  }
+
+  _findBoundaryNestedKey(path, fromEnd) {
+    const likePattern = path.length === 0 ? '%' : this._likePrefix(this._pathToKey(path));
+    const row = (fromEnd ? this.getLastChildKeyStmt : this.getFirstChildKeyStmt).get(likePattern);
+    if (!row) return undefined;
+
+    const fullPath = this._keyToPath(row.key);
+    if (fullPath.length <= path.length) return undefined;
+
+    return fullPath[path.length];
+  }
+
   _getRootObject() {
     const rows = this.getAllStmt.all();
     const result = {};
@@ -255,6 +317,16 @@ export class SqliteDriver extends DeepBaseDriver {
     }
 
     return result;
+  }
+
+  _isMissingNativeBinding(err) {
+    if (!err) return false;
+    const msg = String(err.message || '');
+    return (
+      err.code === 'MODULE_NOT_FOUND' ||
+      msg.includes('Could not locate the bindings file') ||
+      msg.includes('better_sqlite3.node')
+    );
   }
 
   _escapeLikePattern(str) {

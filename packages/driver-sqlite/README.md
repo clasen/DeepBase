@@ -5,8 +5,13 @@ SQLite driver for DeepBase.
 ## Installation
 
 ```bash
-npm install deepbase deepbase-sqlite
+npm install deepbase deepbase-sqlite --ignore-scripts=false
 ```
+
+> `deepbase-sqlite` depends on `better-sqlite3`, a native module. Its install
+> script downloads a prebuilt binary (or compiles from source as a fallback).
+> If your environment disables npm lifecycle scripts, see
+> [Troubleshooting](#troubleshooting) below.
 
 ## Description
 
@@ -77,7 +82,7 @@ Efficiently stores nested objects using a key-value schema:
 - Values are stored as JSON
 - Fast lookups for both exact keys and partial paths
 
-Each row also stores a monotonic `seq` so reads that rebuild objects use `ORDER BY seq, key`. That matches JavaScript insertion order for sibling keys and keeps `shift()` / `pop()` (via `DeepBase.keys()`) aligned with `JsonDriver`. Existing databases pick up `seq` via `ALTER TABLE` on connect (legacy rows default to `0`, then tie-break by `key`).
+Each row also stores a monotonic `seq` so reads that rebuild objects use `ORDER BY seq, key`. That matches JavaScript insertion order for sibling keys and keeps `shift()` / `pop()` aligned with `JsonDriver`. The driver now exposes `first()` / `last()` using SQL boundary queries in the same order semantics as `keys()`. Existing databases pick up `seq` via `ALTER TABLE` on connect (legacy rows default to `0`, then tie-break by `key`).
 
 ### ACID Compliance
 
@@ -143,12 +148,12 @@ CREATE TABLE deepbase (
 Example data:
 
 ```
-key                    | value
------------------------|------------------
-users.alice.name       | "Alice"
-users.alice.age        | 30
-users.bob.name         | "Bob"
-users.bob.age          | 25
+key                   | value
+----------------------|------------------
+users.alice.name      | "Alice"
+users.alice.age       | 30
+users.bob.name        | "Bob"
+users.bob.age         | 25
 config.theme           | "dark"
 config.lang            | "en"
 ```
@@ -263,6 +268,52 @@ await db.set('users', userId, 'profile', data);
 // Avoid: Flat structure loses benefits of nesting
 await db.set(`user_${userId}_profile`, data);
 ```
+
+## Troubleshooting
+
+### `Could not locate the bindings file` / `better_sqlite3.node` missing
+
+This error means `better-sqlite3`'s native binding was never fetched or built.
+It almost always comes from npm install scripts being disabled, which prevents
+`better-sqlite3`'s `install` script from downloading the prebuilt binary.
+
+Check whether scripts are disabled:
+
+```bash
+npm config get ignore-scripts   # should be "false"
+cat ~/.npmrc 2>/dev/null        # look for `ignore-scripts=true`
+cat .npmrc 2>/dev/null
+```
+
+Fix — rebuild the native binding in the project that uses `deepbase-sqlite`:
+
+```bash
+npm rebuild better-sqlite3 --ignore-scripts=false
+```
+
+If `npm rebuild` still doesn't fetch a prebuild (common when `ignore-scripts`
+is persisted in `.npmrc`), do a clean reinstall of just that package:
+
+```bash
+rm -rf node_modules/better-sqlite3
+npm i --ignore-scripts=false
+```
+
+Verify the binding landed:
+
+```bash
+ls node_modules/better-sqlite3/build/Release/better_sqlite3.node
+```
+
+Notes:
+
+- `npm i <pkg> --ignore-scripts=false` only runs scripts if the install
+  actually changes `node_modules`. When npm reports `up to date`, no install
+  scripts run — use `npm rebuild` or remove the package folder first.
+- In monorepos or CI, prefer setting `ignore-scripts=false` for the install
+  step rather than passing it as a one-off flag.
+- When this happens at runtime, `deepbase-sqlite` will throw an error with
+  code `DEEPBASE_SQLITE_BINDING_MISSING` and a pointer back to this section.
 
 ## License
 

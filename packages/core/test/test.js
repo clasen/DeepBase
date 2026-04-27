@@ -509,6 +509,30 @@ describe('DeepBase Core', function() {
     });
   });
 
+  describe('first/last', function() {
+    it('should match keys() boundaries', async function() {
+      const driver = new MockDriver();
+      const db = new DeepBase([driver]);
+
+      await db.set('items', 'a', 1);
+      await db.set('items', 'b', 2);
+      await db.set('items', 'c', 3);
+
+      const keys = await db.keys('items');
+      assert.strictEqual(await db.first('items'), keys[0]);
+      assert.strictEqual(await db.last('items'), keys[keys.length - 1]);
+    });
+
+    it('should return undefined for missing path', async function() {
+      const driver = new MockDriver();
+      const db = new DeepBase([driver]);
+
+      await db.set('items', 'a', 1);
+      assert.strictEqual(await db.first('missing'), undefined);
+      assert.strictEqual(await db.last('missing'), undefined);
+    });
+  });
+
   describe('Array Operations', function() {
     it('should pop last element from array', async function() {
       const driver = new MockDriver();

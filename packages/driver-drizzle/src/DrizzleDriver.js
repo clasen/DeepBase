@@ -1,5 +1,5 @@
 import { DeepBaseDriver } from 'deepbase';
-import { asc, eq, sql } from 'drizzle-orm';
+import { asc, desc, eq, sql } from 'drizzle-orm';
 import { integer as pgInteger, pgTable, text as pgText } from 'drizzle-orm/pg-core';
 import { int as mysqlInt, mysqlTable, text as mysqlText, varchar as mysqlVarchar } from 'drizzle-orm/mysql-core';
 import { integer as sqliteInteger, sqliteTable, text as sqliteText } from 'drizzle-orm/sqlite-core';
@@ -420,6 +420,54 @@ export class DrizzleDriver extends DeepBaseDriver {
     const func = args.pop();
     const keys = args;
     return this._updTxn(keys, func);
+  }
+
+  async first(...args) {
+    return this._firstOrLastKey(args, false);
+  }
+
+  async last(...args) {
+    return this._firstOrLastKey(args, true);
+  }
+
+  _firstOrLastKey(path, fromEnd) {
+    const nestedKey = this._findBoundaryNestedKey(this.drizzle, path, fromEnd);
+    if (nestedKey !== undefined) {
+      return nestedKey;
+    }
+
+    const value = this._getSync(path);
+    if (value === null || typeof value !== 'object') {
+      return undefined;
+    }
+
+    let keyResult;
+    for (const key in value) {
+      if (Object.prototype.hasOwnProperty.call(value, key)) {
+        if (!fromEnd) return key;
+        keyResult = key;
+      }
+    }
+    return keyResult;
+  }
+
+  _findBoundaryNestedKey(d, path, fromEnd) {
+    const likePattern = path.length === 0 ? '%' : this._likePrefix(this._pathToKey(path));
+    const t = this.table;
+    const row = d
+      .select({ key: t.key })
+      .from(t)
+      .where(sql`${t.key} LIKE ${likePattern} ESCAPE '!'`)
+      .orderBy(fromEnd ? desc(t.seq) : asc(t.seq), fromEnd ? desc(t.key) : asc(t.key))
+      .limit(1)
+      .get();
+
+    if (!row) return undefined;
+
+    const fullPath = this._keyToPath(row.key);
+    if (fullPath.length <= path.length) return undefined;
+
+    return fullPath[path.length];
   }
 
   /** @param {any} d */

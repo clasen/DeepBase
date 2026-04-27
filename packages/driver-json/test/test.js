@@ -248,6 +248,19 @@ describe('JsonDriver', function() {
       assert.ok(entries.some(([k, v]) => k === 'alice' && v.age === 30));
       assert.ok(entries.some(([k, v]) => k === 'bob' && v.age === 25));
     });
+
+    it('first/last should match keys() boundaries', async function() {
+      const keys = await db.keys('users');
+      const driver = db.getDriver(0);
+      assert.strictEqual(await driver.first('users'), keys[0]);
+      assert.strictEqual(await driver.last('users'), keys[keys.length - 1]);
+    });
+
+    it('first/last should return undefined for missing path', async function() {
+      const driver = db.getDriver(0);
+      assert.strictEqual(await driver.first('missing'), undefined);
+      assert.strictEqual(await driver.last('missing'), undefined);
+    });
   });
 
   describe('Persistence', function() {
