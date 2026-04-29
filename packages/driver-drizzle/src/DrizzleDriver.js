@@ -102,8 +102,9 @@ export class DrizzleDriver extends DeepBaseDriver {
     });
   }
 
-  _delTxn(key, likePattern) {
+  _delTxn(key, likePattern, keys) {
     this.drizzle.transaction((tx) => {
+      this._expandParentObjects(tx, keys);
       this._delRow(tx, key);
       this._deleteLike(tx, likePattern);
     });
@@ -396,7 +397,7 @@ export class DrizzleDriver extends DeepBaseDriver {
     }
 
     const key = this._pathToKey(keys);
-    this._delTxn(key, this._likePrefix(key));
+    this._delTxn(key, this._likePrefix(key), keys);
   }
 
   async inc(...args) {

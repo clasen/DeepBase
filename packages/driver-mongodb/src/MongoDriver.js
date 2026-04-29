@@ -1,6 +1,8 @@
 import { DeepBaseDriver } from 'deepbase';
 import { MongoClient } from 'mongodb';
 
+const ROOT_VALUE_FIELD = '__deepbase_value';
+
 export class MongoDriver extends DeepBaseDriver {
   constructor({base, database, name, collection, url, ...opts} = {}) {
     super(opts);
@@ -53,11 +55,41 @@ export class MongoDriver extends DeepBaseDriver {
     
     // Unescape the object keys before navigating
     const unescapedObj = this._unescapeObject(obj);
+    if (
+      arr.length === 0 &&
+      Object.keys(unescapedObj).length === 1 &&
+      Object.prototype.hasOwnProperty.call(unescapedObj, ROOT_VALUE_FIELD)
+    ) {
+      return unescapedObj[ROOT_VALUE_FIELD];
+    }
+
     return this._getFromUnescaped(unescapedObj, arr);
   }
   
   async set(...arr) {
-    return this._updateOne(arr, "$set");
+    if (arr.length < 2) return;
+
+    const _id = arr.shift();
+    const val = arr.pop();
+
+    if (arr.length === 0) {
+      const replacement =
+        val !== null && typeof val === 'object' && !Array.isArray(val)
+          ? { _id, ...this._escapeObject(val) }
+          : { _id, [ROOT_VALUE_FIELD]: val };
+
+      return this.collection.replaceOne({ _id }, replacement, { upsert: true });
+    }
+
+    const path = this._pathToKey(arr);
+    return this.collection.updateOne(
+      { _id },
+      {
+        $unset: { [ROOT_VALUE_FIELD]: "" },
+        $set: { [path]: this._escapeValue(val) },
+      },
+      { upsert: true },
+    );
   }
   
   async inc(...arr) {
@@ -73,7 +105,16 @@ export class MongoDriver extends DeepBaseDriver {
     if (arr.length === 0) {
       return this.collection.deleteMany({});
     }
-    return this._updateOne(arr, "$unset");
+
+    const _id = arr.shift();
+    if (arr.length === 0) {
+      return this.collection.deleteOne({ _id });
+    }
+
+    return this.collection.updateOne(
+      { _id },
+      { $unset: { [this._pathToKey(arr)]: "" } },
+    );
   }
   
   async add(...keys) {
@@ -124,10 +165,13 @@ export class MongoDriver extends DeepBaseDriver {
     const val = arr.pop();
     
     // Use _pathToKey to properly escape dots and special characters
-    const set = arr.length == 0 ? { [val]: null } : { [this._pathToKey(arr)]: val };
+    const set = arr.length == 0 ? { [ROOT_VALUE_FIELD]: val } : { [this._pathToKey(arr)]: val };
+    const update = arr.length == 0
+      ? { [type]: set }
+      : { $unset: { [ROOT_VALUE_FIELD]: "" }, [type]: set };
     const opts = { upsert: true };
     
-    return this.collection.updateOne({ _id }, { [type]: set }, opts);
+    return this.collection.updateOne({ _id }, update, opts);
   }
   
   _getFromUnescaped(obj, keys) {
@@ -162,6 +206,24 @@ export class MongoDriver extends DeepBaseDriver {
         } else {
           result[unescapedKey] = value;
         }
+      }
+    }
+    return result;
+  }
+
+  _escapeValue(value) {
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+      return value;
+    }
+
+    return this._escapeObject(value);
+  }
+
+  _escapeObject(obj) {
+    const result = {};
+    for (const key in obj) {
+      if (Object.prototype.hasOwnProperty.call(obj, key)) {
+        result[this._escapeDots(key)] = this._escapeValue(obj[key]);
       }
     }
     return result;

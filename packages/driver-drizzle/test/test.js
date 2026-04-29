@@ -166,6 +166,15 @@ for (const pragma of PRAGMA_MODES) {
         assert.deepStrictEqual(await db.get('user'), { name: 'Alice' });
       });
 
+      it('should delete a deep key from an object value', async function () {
+        await db.set('a', {
+          b: { c: 1, d: 2 },
+          e: 3,
+        });
+        await db.del('a', 'b', 'c');
+        assert.deepStrictEqual(await db.get('a'), { b: { d: 2 }, e: 3 });
+      });
+
       it('should delete parent and all children', async function () {
         await db.set('parent', 'child1', 'value1');
         await db.set('parent', 'child2', 'value2');

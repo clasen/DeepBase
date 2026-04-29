@@ -192,6 +192,16 @@ describe('RedisDriver', function() {
       assert.strictEqual(user.age, undefined);
     });
 
+    it('should delete a deep key from an object value', async function() {
+      await db.set('a', {
+        b: { c: 1, d: 2 },
+        e: 3
+      });
+      await db.del('a', 'b', 'c');
+
+      assert.deepStrictEqual(await db.get('a'), { b: { d: 2 }, e: 3 });
+    });
+
     it('should clear all data', async function() {
       await db.set('key1', 'value1');
       await db.set('key2', 'value2');

@@ -126,7 +126,8 @@ export class SqliteDriver extends DeepBaseDriver {
       this.setStmt.run(key, jsonValue);
     });
 
-    this._delTxn = this.db.transaction((key, likePattern) => {
+    this._delTxn = this.db.transaction((key, likePattern, keys) => {
+      this._expandParentObjects(keys);
       this.delStmt.run(key);
       this.delChildrenStmt.run(likePattern);
     });
@@ -222,7 +223,7 @@ export class SqliteDriver extends DeepBaseDriver {
     }
 
     const key = this._pathToKey(keys);
-    this._delTxn(key, this._likePrefix(key));
+    this._delTxn(key, this._likePrefix(key), keys);
   }
 
   async inc(...args) {
