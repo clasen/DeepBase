@@ -49,6 +49,7 @@ export class SqliteDriver extends DeepBaseDriver {
     }
 
     this.db = null;
+    this._nextSeq = 1;
     SqliteDriver._instances[this.fileName] = this;
   }
 
@@ -102,9 +103,10 @@ export class SqliteDriver extends DeepBaseDriver {
     }
 
     this.getStmt = this.db.prepare('SELECT value FROM deepbase WHERE key = ?');
+    this.getMaxSeqStmt = this.db.prepare('SELECT IFNULL(MAX(seq), 0) AS maxSeq FROM deepbase');
     this.setStmt = this.db.prepare(`
       INSERT INTO deepbase (key, value, seq)
-      VALUES (?, ?, (SELECT IFNULL(MAX(seq), 0) + 1 FROM deepbase))
+      VALUES (?, ?, ?)
       ON CONFLICT(key) DO UPDATE SET value = excluded.value
     `);
     this.delStmt = this.db.prepare('DELETE FROM deepbase WHERE key = ?');
@@ -123,7 +125,7 @@ export class SqliteDriver extends DeepBaseDriver {
 
     this._setTxn = this.db.transaction((key, jsonValue, keys) => {
       this._expandParentObjects(keys);
-      this.setStmt.run(key, jsonValue);
+      this.setStmt.run(key, jsonValue, this._consumeSeq());
     });
 
     this._delTxn = this.db.transaction((key, likePattern, keys) => {
@@ -137,17 +139,19 @@ export class SqliteDriver extends DeepBaseDriver {
       const newValue = func(currentValue);
       const key = this._pathToKey(keys);
       this._expandParentObjects(keys);
-      this.setStmt.run(key, JSON.stringify(newValue));
+      this.setStmt.run(key, JSON.stringify(newValue), this._consumeSeq());
       return keys;
     });
 
     this._setRootTxn = this.db.transaction((entries) => {
       this.db.exec('DELETE FROM deepbase');
+      this._nextSeq = 1;
       for (const [key, value] of entries) {
-        this.setStmt.run(key, JSON.stringify(value));
+        this.setStmt.run(key, JSON.stringify(value), this._consumeSeq());
       }
     });
 
+    this._nextSeq = Number(this.getMaxSeqStmt.get()?.maxSeq || 0) + 1;
     this._connected = true;
   }
 
@@ -219,6 +223,7 @@ export class SqliteDriver extends DeepBaseDriver {
   async del(...keys) {
     if (keys.length === 0) {
       this.db.exec('DELETE FROM deepbase');
+      this._nextSeq = 1;
       return;
     }
 
@@ -412,11 +417,17 @@ export class SqliteDriver extends DeepBaseDriver {
 
           const entries = this._flattenObject(parentValue, parentKey);
           for (const [key, value] of entries) {
-            this.setStmt.run(key, JSON.stringify(value));
+            this.setStmt.run(key, JSON.stringify(value), this._consumeSeq());
           }
         }
       }
     }
+  }
+
+  _consumeSeq() {
+    const seq = this._nextSeq;
+    this._nextSeq += 1;
+    return seq;
   }
 }
 

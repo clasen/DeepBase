@@ -44,6 +44,30 @@ All benchmarks now include:
 - 💾 **Memory Usage**: RSS (Resident Set Size) and Heap usage in MB
 - 📊 **Memory Delta**: Memory increase/decrease during operations
 
+### Migration-like SQLite write benchmark
+
+To diagnose slow write workloads similar to key migration scripts:
+
+```bash
+npm run bench:sqlite-migration-like
+```
+
+Key options:
+
+```bash
+npm run bench:sqlite-migration-like -- --profiles=104916 --write-ops=17872 --runs=2
+npm run bench:sqlite-migration-like -- --pragmas=safe,balanced,fast --concurrency=1,4,8,16
+npm run bench:sqlite-migration-like -- --full-matrix
+```
+
+How to read the output:
+- Compare `flat-set-del-c1` vs `flat-set-only-c1` to estimate delete cost.
+- Compare `flat-set-del-c1` vs `deep-set-del-c1` to estimate parent-object expansion cost.
+- Compare `c1`/`c4`/`c8`/`c16` to detect single-writer contention.
+- Compare `safe`/`balanced`/`fast` with the same scenario to quantify durability vs throughput.
+
+The script also writes a JSON artifact to `benchmarks/results/` so runs can be compared over time.
+
 ### Memory Metrics Explained
 
 - **RSS (Resident Set Size)**: Total memory allocated to the process
