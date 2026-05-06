@@ -98,7 +98,7 @@ export class DrizzleDriver extends DeepBaseDriver {
   _setTxn(key, jsonValue, keys) {
     this.drizzle.transaction((tx) => {
       this._expandParentObjects(tx, keys);
-      this._setRow(tx, key, jsonValue);
+      this._replaceRow(tx, key, jsonValue);
     });
   }
 
@@ -241,7 +241,7 @@ export class DrizzleDriver extends DeepBaseDriver {
       const newValue = func(currentValue);
       const key = this._pathToKey(keys);
       this._expandParentObjects(tx, keys);
-      this._setRow(tx, key, JSON.stringify(newValue));
+      this._replaceRow(tx, key, JSON.stringify(newValue));
       return keys;
     });
   }
@@ -301,6 +301,12 @@ export class DrizzleDriver extends DeepBaseDriver {
   _deleteLike(d, likePattern) {
     const t = this.table;
     d.delete(t).where(sql`${t.key} LIKE ${likePattern} ESCAPE '!'`).run();
+  }
+
+  /** @param {any} d */
+  _replaceRow(d, key, jsonValue) {
+    this._deleteLike(d, this._likePrefix(key));
+    this._setRow(d, key, jsonValue);
   }
 
   async connect() {

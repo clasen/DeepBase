@@ -125,7 +125,7 @@ export class SqliteDriver extends DeepBaseDriver {
 
     this._setTxn = this.db.transaction((key, jsonValue, keys) => {
       this._expandParentObjects(keys);
-      this.setStmt.run(key, jsonValue, this._consumeSeq());
+      this._replaceRow(key, jsonValue);
     });
 
     this._delTxn = this.db.transaction((key, likePattern, keys) => {
@@ -139,7 +139,7 @@ export class SqliteDriver extends DeepBaseDriver {
       const newValue = func(currentValue);
       const key = this._pathToKey(keys);
       this._expandParentObjects(keys);
-      this.setStmt.run(key, JSON.stringify(newValue), this._consumeSeq());
+      this._replaceRow(key, JSON.stringify(newValue));
       return keys;
     });
 
@@ -218,6 +218,11 @@ export class SqliteDriver extends DeepBaseDriver {
     const key = this._pathToKey(keys);
     this._setTxn(key, JSON.stringify(value), keys);
     return keys;
+  }
+
+  _replaceRow(key, jsonValue) {
+    this.delChildrenStmt.run(this._likePrefix(key));
+    this.setStmt.run(key, jsonValue, this._consumeSeq());
   }
 
   async del(...keys) {

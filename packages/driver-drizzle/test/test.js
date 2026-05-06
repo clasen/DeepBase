@@ -446,6 +446,32 @@ for (const pragma of PRAGMA_MODES) {
         assert.deepStrictEqual(await db.get('settings'), { a: 1, b: 99, c: 3, d: 4 });
       });
 
+      it('should replace stale child keys when setting a parent object', async function () {
+        await db.set('profile', 'chinchon:MZM3Z', 'remoteData', 'denounces', 1000);
+        await db.set('profile', 'chinchon:MZM3Z', {
+          game: 'chinchon',
+          remoteData: {
+            hid: 'MZM3Z',
+            denounces: 0,
+          },
+        });
+
+        const profile = await db.get('profile', 'chinchon:MZM3Z');
+        assert.strictEqual(profile.remoteData.denounces, 0);
+        assert.strictEqual(await db.get('profile', 'chinchon:MZM3Z', 'remoteData', 'denounces'), 0);
+      });
+
+      it('should keep sibling keys with similar prefixes when replacing a parent object', async function () {
+        await db.set('a', 'b', 'c', 1);
+        await db.set('a', 'bc', 'c', 2);
+        await db.set('a', 'b', { c: 0 });
+
+        assert.deepStrictEqual(await db.get('a'), {
+          b: { c: 0 },
+          bc: { c: 2 },
+        });
+      });
+
       it('should handle nested object then deeper nesting', async function () {
         await db.set('user', { name: 'Alice', meta: { role: 'admin' } });
         await db.set('user', 'meta', 'role', 'user');

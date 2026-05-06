@@ -291,8 +291,8 @@ async function main() {
     }
     
     log(`\n📌 New version: ${newVersion}`, 'green');
-    const confirm = await prompt('\nContinue? (y/n): ');
-    if (confirm.toLowerCase() !== 'y') {
+    const confirm = (await prompt('\nContinue? (Y/n): ')).trim().toLowerCase();
+    if (confirm !== '' && confirm !== 'y') {
       log('\n❌ Cancelled', 'red');
       process.exit(0);
     }
