@@ -394,6 +394,37 @@ for (const pragma of PRAGMA_MODES) {
         assert.deepStrictEqual(await db.get(), { new: 'data' });
         assert.strictEqual(await db.get('old'), null);
       });
+
+      it('should read root when a null parent row coexists with child rows', async function () {
+        const itemPath = await db.add('user1', 'message', 'pending', { test: 1 });
+        const itemId = itemPath[itemPath.length - 1];
+        const driver = db.getDriver(0);
+        driver.db.prepare('INSERT OR REPLACE INTO deepbase (key, value, seq) VALUES (?, ?, ?)').run(
+          'user1.message.pending',
+          'null',
+          999,
+        );
+
+        const pending = {
+          [itemId]: { test: 1 },
+        };
+        const message = {
+          pending,
+        };
+        const user = {
+          message,
+        };
+
+        assert.deepStrictEqual(await db.get(), {
+          user1: {
+            message,
+          },
+        });
+        assert.deepStrictEqual(await db.get('user1'), user);
+        assert.deepStrictEqual(await db.get('user1', 'message'), message);
+        assert.deepStrictEqual(await db.get('user1', 'message', 'pending'), pending);
+        assert.deepStrictEqual(await db.keys('user1', 'message', 'pending'), [itemId]);
+      });
     });
 
     describe('Deep Nesting', function () {

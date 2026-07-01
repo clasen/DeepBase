@@ -56,6 +56,6 @@
     "url": "git+https://github.com/clasen/DeepBase.git"
   },
   "devDependencies": {
-    "better-sqlite3": "^11.8.1"
+    "better-sqlite3": "^11.10.0"
   }
 }

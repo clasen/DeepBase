@@ -132,7 +132,7 @@ function runTests() {
   for (const pkg of PACKAGES) {
     log(`\n  Testing ${pkg.name}...`, 'yellow');
     try {
-      exec('npm test', path.join(ROOT, pkg.path), true);
+      exec('pnpm test', path.join(ROOT, pkg.path), true);
       log(`  ✓ ${pkg.name} tests passed`, 'green');
     } catch (error) {
       log(`  ✗ ${pkg.name} tests failed`, 'red');
@@ -147,8 +147,8 @@ function publishPackages(dryRun = false) {
   log('\n📦 Publishing packages...', 'cyan');
   
   const publishCmd = dryRun 
-    ? 'npm publish --dry-run --access public'
-    : 'npm publish --access public';
+    ? 'pnpm publish --dry-run --access public'
+    : 'pnpm publish --access public';
   
   for (const pkg of PACKAGES) {
     log(`\n  Publishing ${pkg.name}...`, 'yellow');
@@ -345,7 +345,7 @@ if (process.argv.includes('--help') || process.argv.includes('-h')) {
 🚀 DeepBase Publishing Tool
 
 Usage:
-  npm run publish [version] [options]
+  pnpm run publish [version] [options]
 
 Versions:
   patch              Increment patch version (X.Y.Z → X.Y.Z+1)
@@ -360,10 +360,10 @@ Options:
   --help, -h         Show this help
 
 Examples:
-  npm run publish patch              # Increment patch version
-  npm run publish 3.1.0              # Publish version 3.1.0
-  npm run publish patch --dry-run    # Simulate publishing
-  npm run publish                    # Interactive mode
+  pnpm run publish patch              # Increment patch version
+  pnpm run publish 3.1.0              # Publish version 3.1.0
+  pnpm run publish patch --dry-run    # Simulate publishing
+  pnpm run publish                    # Interactive mode
 
 The script:
   1. Updates versions in all package.json files

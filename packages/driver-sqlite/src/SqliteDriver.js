@@ -352,12 +352,24 @@ export class SqliteDriver extends DeepBaseDriver {
     if (path.length === 0) return;
 
     if (path.length === 1) {
-      obj[path[0]] = value;
+      const key = path[0];
+      const existing = obj[key];
+      if (
+        value === null &&
+        existing !== null &&
+        typeof existing === 'object' &&
+        !Array.isArray(existing) &&
+        Object.keys(existing).length > 0
+      ) {
+        return;
+      }
+      obj[key] = value;
       return;
     }
 
     const key = path[0];
-    if (!obj.hasOwnProperty(key) || typeof obj[key] !== 'object') {
+    const current = obj[key];
+    if (!obj.hasOwnProperty(key) || current === null || typeof current !== 'object' || Array.isArray(current)) {
       obj[key] = {};
     }
 
