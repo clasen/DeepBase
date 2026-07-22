@@ -353,17 +353,31 @@ for (const pragma of PRAGMA_MODES) {
       });
     });
 
-    describe('Singleton Pattern', function () {
-      it('should return same instance for same file', function () {
+    describe('Independent Connection Lifecycle', function () {
+      it('should create independent instances for the same file', function () {
         const d1 = new SqliteDriver({ name: `singleton-${pragma}`, path: testDataPath, pragma });
         const d2 = new SqliteDriver({ name: `singleton-${pragma}`, path: testDataPath, pragma });
-        assert.strictEqual(d1, d2);
+        assert.notStrictEqual(d1, d2);
       });
 
       it('should return different instances for different files', function () {
         const d1 = new SqliteDriver({ name: `file1-${pragma}`, path: testDataPath, pragma });
         const d2 = new SqliteDriver({ name: `file2-${pragma}`, path: testDataPath, pragma });
         assert.notStrictEqual(d1, d2);
+      });
+
+      it('disconnecting one instance should not close another connection', async function () {
+        const name = `lifecycle-${pragma}`;
+        const d1 = new SqliteDriver({ name, path: testDataPath, pragma });
+        const d2 = new SqliteDriver({ name, path: testDataPath, pragma });
+        await d1.connect();
+        await d2.connect();
+        await d1.set('first', 1);
+        await d1.disconnect();
+        await d2.set('second', 2);
+        assert.strictEqual(await d2.get('first'), 1);
+        assert.strictEqual(await d2.get('second'), 2);
+        await d2.disconnect();
       });
     });
 

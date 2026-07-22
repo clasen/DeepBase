@@ -2,55 +2,28 @@ import { DeepBaseDriver } from 'deepbase';
 import Database from 'better-sqlite3';
 import fs from 'fs';
 import * as pathModule from 'path';
-
-const PRAGMA = {
-  none: null,
-  safe: {
-    journal_mode: 'WAL',
-    synchronous: 'FULL',
-    temp_store: 'MEMORY',
-    cache_size: -2000,
-    busy_timeout: 5000,
-    mmap_size: 0,
-  },
-  balanced: {
-    journal_mode: 'WAL',
-    synchronous: 'NORMAL',
-    temp_store: 'MEMORY',
-    cache_size: -8000,
-    busy_timeout: 5000,
-    mmap_size: 268435456,
-  },
-  fast: {
-    journal_mode: 'WAL',
-    synchronous: 'OFF',
-    temp_store: 'MEMORY',
-    cache_size: -16000,
-    busy_timeout: 5000,
-    mmap_size: 268435456,
-  },
-};
+import { withBusyRetry } from './busy.js';
+import { resolveSqliteConfig } from './config.js';
+import { migrateSchema } from './schema.js';
 
 export class SqliteDriver extends DeepBaseDriver {
-  static _instances = {};
-
-  constructor({ name, path, pragma, ...opts } = {}) {
+  constructor({ name, path, pragma, busyTimeoutMs, busyRetry, ...opts } = {}) {
     super(opts);
 
+    const config = resolveSqliteConfig({ pragma, busyTimeoutMs, busyRetry });
     this.name = name || 'default';
     this.path = path || pathModule.join(process.cwd(), 'db');
-    this.pragma = pragma || 'balanced';
+    this.pragma = config.pragma;
+    this.pragmaConfig = config.pragmaConfig;
+    this.busyTimeoutMs = config.busyTimeoutMs;
+    this.busyRetry = config.busyRetry;
 
     this.path = pathModule.resolve(this.path);
     this.fileName = pathModule.join(this.path, `${this.name}.db`);
 
-    if (SqliteDriver._instances[this.fileName]) {
-      return SqliteDriver._instances[this.fileName];
-    }
-
     this.db = null;
-    this._nextSeq = 1;
-    SqliteDriver._instances[this.fileName] = this;
+    this._connectPromise = null;
+    this._writeQueue = Promise.resolve();
   }
 
   _connectSync() {
@@ -61,7 +34,7 @@ export class SqliteDriver extends DeepBaseDriver {
     }
 
     try {
-      this.db = new Database(this.fileName);
+      this.db = new Database(this.fileName, { timeout: this.busyTimeoutMs });
     } catch (err) {
       if (this._isMissingNativeBinding(err)) {
         const hint =
@@ -78,35 +51,22 @@ export class SqliteDriver extends DeepBaseDriver {
       throw err;
     }
 
-    const cfg = PRAGMA[this.pragma];
+    const cfg = this.pragmaConfig;
     if (cfg) {
       this.db.pragma(`journal_mode = ${cfg.journal_mode}`);
       this.db.pragma(`synchronous = ${cfg.synchronous}`);
       this.db.pragma(`temp_store = ${cfg.temp_store}`);
       this.db.pragma(`cache_size = ${cfg.cache_size}`);
-      this.db.pragma(`busy_timeout = ${cfg.busy_timeout}`);
       this.db.pragma(`mmap_size = ${cfg.mmap_size}`);
     }
 
     const withoutRowid = cfg ? ' WITHOUT ROWID' : '';
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS deepbase (
-        key TEXT PRIMARY KEY,
-        value TEXT NOT NULL,
-        seq INTEGER NOT NULL DEFAULT 0
-      )${withoutRowid}
-    `);
-
-    const tableCols = this.db.prepare('PRAGMA table_info(deepbase)').all();
-    if (!tableCols.some((c) => c.name === 'seq')) {
-      this.db.exec('ALTER TABLE deepbase ADD COLUMN seq INTEGER NOT NULL DEFAULT 0');
-    }
+    migrateSchema(this.db, { withoutRowid });
 
     this.getStmt = this.db.prepare('SELECT value FROM deepbase WHERE key = ?');
-    this.getMaxSeqStmt = this.db.prepare('SELECT IFNULL(MAX(seq), 0) AS maxSeq FROM deepbase');
     this.setStmt = this.db.prepare(`
       INSERT INTO deepbase (key, value, seq)
-      VALUES (?, ?, ?)
+      VALUES (?, ?, (SELECT IFNULL(MAX(seq), 0) + 1 FROM deepbase))
       ON CONFLICT(key) DO UPDATE SET value = excluded.value
     `);
     this.delStmt = this.db.prepare('DELETE FROM deepbase WHERE key = ?');
@@ -123,18 +83,20 @@ export class SqliteDriver extends DeepBaseDriver {
     this.delChildrenStmt = this.db.prepare("DELETE FROM deepbase WHERE key LIKE ? ESCAPE '!'");
     this.hasChildrenStmt = this.db.prepare("SELECT 1 FROM deepbase WHERE key LIKE ? ESCAPE '!' LIMIT 1");
 
-    this._setTxn = this.db.transaction((key, jsonValue, keys) => {
+    const setTxn = this.db.transaction((key, jsonValue, keys) => {
       this._expandParentObjects(keys);
       this._replaceRow(key, jsonValue);
     });
+    this._setTxn = (...args) => setTxn.immediate(...args);
 
-    this._delTxn = this.db.transaction((key, likePattern, keys) => {
+    const delTxn = this.db.transaction((key, likePattern, keys) => {
       this._expandParentObjects(keys);
       this.delStmt.run(key);
       this.delChildrenStmt.run(likePattern);
     });
+    this._delTxn = (...args) => delTxn.immediate(...args);
 
-    this._updTxn = this.db.transaction((keys, func) => {
+    const updTxn = this.db.transaction((keys, func) => {
       const currentValue = this._getSync(keys);
       const newValue = func(currentValue);
       const key = this._pathToKey(keys);
@@ -142,37 +104,84 @@ export class SqliteDriver extends DeepBaseDriver {
       this._replaceRow(key, JSON.stringify(newValue));
       return keys;
     });
+    this._updTxn = (...args) => updTxn.immediate(...args);
 
-    this._setRootTxn = this.db.transaction((entries) => {
+    const setRootTxn = this.db.transaction((entries) => {
       this.db.exec('DELETE FROM deepbase');
-      this._nextSeq = 1;
       for (const [key, value] of entries) {
-        this.setStmt.run(key, JSON.stringify(value), this._consumeSeq());
+        this.setStmt.run(key, JSON.stringify(value));
       }
     });
+    this._setRootTxn = (...args) => setRootTxn.immediate(...args);
 
-    this._nextSeq = Number(this.getMaxSeqStmt.get()?.maxSeq || 0) + 1;
+    const clearTxn = this.db.transaction(() => {
+      this.db.exec('DELETE FROM deepbase');
+    });
+    this._clearTxn = (...args) => clearTxn.immediate(...args);
+
     this._connected = true;
   }
 
   async connect() {
-    this._connectSync();
+    if (this._connected) return;
+    if (!this._connectPromise) {
+      this._connectPromise = withBusyRetry(() => this._openSync(), this.busyRetry)
+        .finally(() => {
+          this._connectPromise = null;
+        });
+    }
+    return this._connectPromise;
+  }
+
+  _openSync() {
+    try {
+      this._connectSync();
+    } catch (error) {
+      this._closeConnection();
+      throw error;
+    }
   }
 
   async disconnect() {
+    return this._queueWrite(async () => {
+      if (this._connectPromise) {
+        await this._connectPromise;
+      }
+      this._closeConnection();
+    });
+  }
+
+  _closeConnection() {
     if (this.db) {
       this.db.close();
-      this.db = null;
     }
+    this.db = null;
     this._connected = false;
   }
 
+  _queueWrite(operation) {
+    const result = this._writeQueue.then(operation, operation);
+    this._writeQueue = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
+  }
+
+  _runWrite(operation) {
+    return this._queueWrite(async () => {
+      await this.connect();
+      return withBusyRetry(operation, this.busyRetry);
+    });
+  }
+
   async get(...args) {
+    await this.connect();
     return this._getSync(args);
   }
 
   getSync(...args) {
-    this._connectSync();
+    this._openSync();
     return this._getSync(args);
   }
 
@@ -205,35 +214,40 @@ export class SqliteDriver extends DeepBaseDriver {
     }
 
     if (args.length === 1) {
-      await this._setRootObject(args[0]);
-      return [];
+      const entries = this._flattenObject(args[0]);
+      return this._runWrite(() => {
+        this._setRootTxn(entries);
+        return [];
+      });
     }
 
-    return this._setSync(args);
-  }
-
-  _setSync(args) {
     const keys = args.slice(0, -1);
     const value = args[args.length - 1];
     const key = this._pathToKey(keys);
-    this._setTxn(key, JSON.stringify(value), keys);
-    return keys;
+    const jsonValue = JSON.stringify(value);
+    return this._runWrite(() => {
+      this._setTxn(key, jsonValue, keys);
+      return keys;
+    });
   }
 
   _replaceRow(key, jsonValue) {
     this.delChildrenStmt.run(this._likePrefix(key));
-    this.setStmt.run(key, jsonValue, this._consumeSeq());
+    this.setStmt.run(key, jsonValue);
   }
 
   async del(...keys) {
     if (keys.length === 0) {
-      this.db.exec('DELETE FROM deepbase');
-      this._nextSeq = 1;
-      return;
+      return this._runWrite(() => {
+        this._clearTxn();
+      });
     }
 
     const key = this._pathToKey(keys);
-    this._delTxn(key, this._likePrefix(key), keys);
+    const likePattern = this._likePrefix(key);
+    return this._runWrite(() => {
+      this._delTxn(key, likePattern, keys);
+    });
   }
 
   async inc(...args) {
@@ -256,14 +270,16 @@ export class SqliteDriver extends DeepBaseDriver {
   async upd(...args) {
     const func = args.pop();
     const keys = args;
-    return this._updTxn(keys, func);
+    return this._runWrite(() => this._updTxn(keys, func));
   }
 
   async first(...args) {
+    await this.connect();
     return this._firstOrLastKey(args, false);
   }
 
   async last(...args) {
+    await this.connect();
     return this._firstOrLastKey(args, true);
   }
 
@@ -308,11 +324,6 @@ export class SqliteDriver extends DeepBaseDriver {
       this._setNestedValue(result, path, value);
     }
     return result;
-  }
-
-  async _setRootObject(obj) {
-    const entries = this._flattenObject(obj);
-    this._setRootTxn(entries);
   }
 
   _buildObjectFromChildren(parentKey, likePattern) {
@@ -434,17 +445,11 @@ export class SqliteDriver extends DeepBaseDriver {
 
           const entries = this._flattenObject(parentValue, parentKey);
           for (const [key, value] of entries) {
-            this.setStmt.run(key, JSON.stringify(value), this._consumeSeq());
+            this.setStmt.run(key, JSON.stringify(value));
           }
         }
       }
     }
-  }
-
-  _consumeSeq() {
-    const seq = this._nextSeq;
-    this._nextSeq += 1;
-    return seq;
   }
 }
 

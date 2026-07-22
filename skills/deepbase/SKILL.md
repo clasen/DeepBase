@@ -326,7 +326,19 @@ new SqliteDriver({ path: './data', name: 'app' })
 
 // Explicit mode
 new SqliteDriver({ path: './data', name: 'app', pragma: 'fast' })
+
+// Tune transient same-host writer contention
+new SqliteDriver({
+  path: './data',
+  name: 'app',
+  busyTimeoutMs: 5000,
+  busyRetry: { maxAttempts: 2, baseDelayMs: 25, maxDelayMs: 250 },
+})
 ```
+
+SQLite drivers use independent connections and coordinate same-host processes
+with `BEGIN IMMEDIATE` plus bounded retries. WAL does not support shared
+database files across multiple hosts or NFS.
 
 Benchmark gains of `balanced` vs `none`: **+1772%** write, **+2187%** batch write, **29% smaller** disk (compacted). All modes pass the full test suite.
 

@@ -2,7 +2,7 @@
  * Example: Concurrency-Safe Operations
  * 
  * This example demonstrates that DeepBase drivers now handle
- * concurrent operations safely without race conditions.
+ * concurrent operations safely within their documented deployment model.
  */
 
 import DeepBase from 'deepbase';
@@ -17,9 +17,7 @@ async function demonstrateRaceConditionProtection() {
   // Example 1: Concurrent Increments (Banking scenario)
   console.log('📊 Example 1: Bank Account with Concurrent Deposits\n');
   
-  const bankDB = new DeepBase({ 
-    driver: new JsonDriver({ name: 'bank', path: './data' })
-  });
+  const bankDB = new DeepBase(new JsonDriver({ name: 'bank', path: './data' }));
   await bankDB.connect();
   
   // Initialize account
@@ -42,9 +40,9 @@ async function demonstrateRaceConditionProtection() {
   // Example 2: Concurrent Updates (Inventory System)
   console.log('📦 Example 2: Inventory with Concurrent Updates\n');
   
-  const inventoryDB = new DeepBase({
-    driver: new SqliteDriver({ name: 'inventory', path: './data' })
-  });
+  const inventoryDB = new DeepBase(
+    new SqliteDriver({ name: 'inventory', path: './data' }),
+  );
   await inventoryDB.connect();
   
   // Initialize inventory
@@ -82,9 +80,7 @@ async function demonstrateRaceConditionProtection() {
   // Example 3: Concurrent Adds (Order Processing)
   console.log('🛒 Example 3: Order Queue with Concurrent Additions\n');
   
-  const ordersDB = new DeepBase({
-    driver: new JsonDriver({ name: 'orders', path: './data' })
-  });
+  const ordersDB = new DeepBase(new JsonDriver({ name: 'orders', path: './data' }));
   await ordersDB.connect();
   
   await ordersDB.set('orders', {});
@@ -117,7 +113,7 @@ async function demonstrateRaceConditionProtection() {
   console.log('  • All concurrent operations completed successfully');
   console.log('  • No race conditions detected');
   console.log('  • Data integrity maintained');
-  console.log('  • Safe for production use in concurrent environments');
+  console.log('  • SQLite also coordinates independent same-host processes');
   console.log('═'.repeat(50) + '\n');
 }
 

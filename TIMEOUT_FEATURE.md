@@ -176,6 +176,10 @@ try {
 - Original operation continues in the background but result is ignored
 - No timeout (`0` or undefined) allows operations to run indefinitely
 - Timeout values are in milliseconds
+- `Promise.race()` does not cancel driver work. In particular, synchronous
+  `better-sqlite3` calls block the event loop and cannot be interrupted by a
+  DeepBase timeout; configure `busyTimeoutMs` and `busyRetry` on
+  `SqliteDriver` to bound lock handling at the driver layer.
 
 ## Best Practices
 

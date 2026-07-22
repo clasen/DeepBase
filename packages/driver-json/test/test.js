@@ -699,7 +699,6 @@ describe('Multi-Driver: JsonDriver + SqliteDriver (add + pop + shift)', function
   beforeEach(async function() {
     testCounter++;
     JsonDriver._instances = {};
-    SqliteDriver._instances = {};
 
     jsonDriver = new JsonDriver({ name: `multi-${testCounter}`, path: multiDataPath });
     sqliteDriver = new SqliteDriver({ name: `multi-${testCounter}`, path: multiDataPath });
@@ -711,7 +710,6 @@ describe('Multi-Driver: JsonDriver + SqliteDriver (add + pop + shift)', function
   afterEach(async function() {
     await db.disconnect();
     JsonDriver._instances = {};
-    SqliteDriver._instances = {};
     if (fs.existsSync(multiDataPath)) {
       fs.rmSync(multiDataPath, { recursive: true, force: true });
     }

@@ -141,6 +141,16 @@ Tests the JSON filesystem driver:
 - Return same instance for same file
 - Return different instances for different files
 
+### deepbase-sqlite
+
+Tests the SQLite driver across all PRAGMA profiles, including nested data,
+atomic updates, independent connection lifecycle, automatic schema migration,
+bounded lock retries, and real same-host concurrency using child processes.
+
+```bash
+npm test -w deepbase-sqlite
+```
+
 ### deepbase-mongodb (28 tests)
 
 Tests the MongoDB driver:

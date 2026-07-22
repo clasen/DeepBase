@@ -49,6 +49,12 @@ new SqliteDriver({
   path: './data',              // Directory to store database files
   name: 'default',            // Database filename (without .db)
   pragma: 'balanced',         // Performance profile: 'none' | 'safe' | 'balanced' | 'fast'
+  busyTimeoutMs: 5000,        // Native wait per lock attempt
+  busyRetry: {
+    maxAttempts: 2,           // Total transaction attempts
+    baseDelayMs: 25,          // Exponential backoff base
+    maxDelayMs: 250           // Backoff cap
+  },
   nidAlphabet: 'ABC...',      // Alphabet for ID generation
   nidLength: 10               // Length of generated IDs
 })
@@ -64,15 +70,19 @@ Uses `better-sqlite3` for synchronous operations wrapped in async API:
 - Transaction support for batch operations
 - Fast lookups with indexed keys
 
-### Singleton Pattern
+### Multi-process concurrency
 
-Multiple instances pointing to the same database file will share the same connection:
+Multiple instances and same-host processes may safely point to the same database file. Each driver owns its connection and lifecycle; SQLite coordinates writers using WAL, `BEGIN IMMEDIATE`, a busy timeout, and bounded transaction retries:
 
 ```javascript
 const db1 = new DeepBase(new SqliteDriver({ name: 'mydb' }));
 const db2 = new DeepBase(new SqliteDriver({ name: 'mydb' }));
-// Both use the same underlying database connection
+// Independent connections; disconnecting db1 does not close db2.
 ```
+
+SQLite still permits only one writer at a time. Keep write transactions short and use a client-server database when sustained write contention or multiple hosts are required. WAL requires a local filesystem shared by processes on the same host; do not place the database on NFS.
+
+When upgrading from a version that used the in-memory sequence counter, stop all old writer processes before starting the new version. The schema migration is automatic, but old and new sequence allocators must not write concurrently during a rolling deployment.
 
 ### Nested Data Structure
 
@@ -82,7 +92,7 @@ Efficiently stores nested objects using a key-value schema:
 - Values are stored as JSON
 - Fast lookups for both exact keys and partial paths
 
-Each row also stores a monotonic `seq` so reads that rebuild objects use `ORDER BY seq, key`. That matches JavaScript insertion order for sibling keys and keeps `shift()` / `pop()` aligned with `JsonDriver`. The driver now exposes `first()` / `last()` using SQL boundary queries in the same order semantics as `keys()`. Existing databases pick up `seq` via `ALTER TABLE` on connect (legacy rows default to `0`, then tie-break by `key`).
+Each row also stores a monotonic, database-assigned `seq` so reads that rebuild objects use `ORDER BY seq, key`. That matches JavaScript insertion order for sibling keys and keeps `shift()` / `pop()` aligned with `JsonDriver`. Existing databases migrate automatically inside an atomic `BEGIN IMMEDIATE` transaction. Legacy and duplicate sequence values are normalized while preserving their previous `ORDER BY seq, key` order.
 
 ### ACID Compliance
 
@@ -90,7 +100,7 @@ SQLite provides:
 
 - **Atomicity**: All operations complete or none do
 - **Consistency**: Data remains valid across transactions
-- **Isolation**: Concurrent operations don't interfere
+- **Isolation**: Concurrent writes are serialized by SQLite
 - **Durability**: Committed data persists even after crashes
 
 ## Pragma Modes
@@ -104,7 +114,7 @@ SQLite provides:
 | **balanced** *(default)* | NORMAL | 8 MB | 256 MB | Yes | Best mix of speed and safety for most apps |
 | **fast** | OFF | 16 MB | 256 MB | Yes | Maximum throughput — data may be lost on OS crash |
 
-All WAL modes use `journal_mode=WAL`, `temp_store=MEMORY`, and `busy_timeout=5000ms`.
+All WAL modes use `journal_mode=WAL` and `temp_store=MEMORY`. Lock waiting is configured independently through `busyTimeoutMs` and therefore also applies to `pragma: 'none'`.
 
 ```javascript
 // Backward-compatible (no PRAGMAs, no WITHOUT ROWID)
@@ -132,30 +142,33 @@ import { SqliteFastDriver } from 'deepbase-sqlite';
 Data is stored in a simple key-value table:
 
 ```sql
--- pragma: 'none' (legacy-compatible)
 CREATE TABLE deepbase (
   key TEXT PRIMARY KEY,
-  value TEXT NOT NULL
-)
+  value TEXT NOT NULL,
+  seq INTEGER NOT NULL
+);
 
--- pragma: 'safe' | 'balanced' | 'fast' (optimized)
-CREATE TABLE deepbase (
+CREATE UNIQUE INDEX deepbase_seq_unique ON deepbase(seq);
+
+CREATE TABLE deepbase_meta (
   key TEXT PRIMARY KEY,
-  value TEXT NOT NULL
-) WITHOUT ROWID
+  value INTEGER NOT NULL
+);
 ```
+
+`deepbase_meta` is always created `WITHOUT ROWID`; optimized PRAGMA profiles do the same for `deepbase`. The metadata table tracks the internal schema version, while user data remains exclusively in `deepbase`.
 
 Example data:
 
 ```
-key                   | value
-----------------------|------------------
-users.alice.name      | "Alice"
-users.alice.age       | 30
-users.bob.name        | "Bob"
-users.bob.age         | 25
-config.theme           | "dark"
-config.lang            | "en"
+key                   | value    | seq
+----------------------|----------|----
+users.alice.name      | "Alice"  | 1
+users.alice.age       | 30       | 2
+users.bob.name        | "Bob"    | 3
+users.bob.age         | 25       | 4
+config.theme          | "dark"   | 5
+config.lang           | "en"     | 6
 ```
 
 ## Use Cases
@@ -270,6 +283,17 @@ await db.set(`user_${userId}_profile`, data);
 ```
 
 ## Troubleshooting
+
+### `SQLITE_BUSY` / `database is locked`
+
+The driver waits and retries complete transactions when another connection owns the write lock. If the retry budget is exhausted:
+
+1. Confirm every process points to the same local filesystem, not NFS.
+2. Look for long-running migrations, raw `better-sqlite3` connections, SQLite tools, or overlapping deployments.
+3. Increase `busyTimeoutMs` or `busyRetry.maxAttempts` only for known transient contention.
+4. Move to a client-server database if write contention is sustained.
+
+`better-sqlite3` is synchronous. Each native lock wait blocks that Node.js thread for up to `busyTimeoutMs`; the JavaScript backoff between attempts is asynchronous.
 
 ### `Could not locate the bindings file` / `better_sqlite3.node` missing
 
