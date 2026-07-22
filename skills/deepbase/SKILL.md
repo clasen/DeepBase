@@ -85,7 +85,7 @@ const { DeepBase } = require('deepbase');
 // Individual drivers
 import { JsonDriver } from 'deepbase-json';
 import { MongoDriver } from 'deepbase-mongodb';
-import { SqliteDriver } from 'deepbase-sqlite'; // pragma: 'none'|'safe'|'balanced'(default)|'fast'
+import { SqliteDriver } from 'deepbase-sqlite'; // pragma + busyTimeoutMs/busyRetry; same-host multi-process safe
 import { RedisDriver } from 'deepbase-redis';
 import { RedisDriver as RedisJsonDriver } from 'deepbase-redis-json';
 import { IndexedDBDriver } from 'deepbase-indexeddb';
@@ -165,7 +165,7 @@ new DeepBase(drivers, {
 | Driver | Key Options |
 |--------|-------------|
 | `JsonDriver` | `path` (directory), `name` (filename), `stringify` / `parse` (custom serialization) |
-| `SqliteDriver` | `path` (directory), `name` (database filename), `pragma` (`'none'` \| `'safe'` \| `'balanced'` \| `'fast'`, default `'balanced'`) |
+| `SqliteDriver` | `path` (directory), `name` (database filename), `pragma` (`'none'` \| `'safe'` \| `'balanced'` \| `'fast'`, default `'balanced'`), `busyTimeoutMs` (native lock wait ms, default `5000`), `busyRetry` (`{ maxAttempts, baseDelayMs, maxDelayMs }`) |
 | `MongoDriver` | `url`, `database`, `collection` |
 | `RedisDriver` | `url`, `prefix` |
 | `RedisJsonDriver` | `url`, `prefix` (requires Redis Stack with RedisJSON module) |
@@ -185,6 +185,9 @@ Follow these rules when generating DeepBase code:
 8. **Set `failOnPrimaryError: false` for resilient setups.** When using multi-driver for fault tolerance, disable this so operations continue via fallback drivers.
 9. **Use environment variables for connection strings.** Never hardcode MongoDB URLs or Redis URLs in source code.
 10. **Prefer `deepbase-redis-json` over `deepbase-redis`** when working with Redis Stack, as it supports native JSON operations.
+11. **SQLite same-host writers are safe by default.** Multiple processes may open the same `.db` file; writers wait/retry via `BEGIN IMMEDIATE` + `busyTimeoutMs` / `busyRetry`. Keep one writer process per host when contention is sustained.
+12. **Never put SQLite on NFS or share one file across hosts.** WAL requires a local filesystem on a single host. For multi-host writers, use MongoDB/Redis/Postgres instead.
+13. **Stop old SQLite writers before upgrading.** Schema/`seq` migration is automatic, but do not run old in-memory-seq binaries and new SQL-seq binaries against the same file at once.
 
 ## Examples
 
@@ -308,8 +311,12 @@ All methods listed in `DeepBaseDriver` must be implemented. `keys()`, `values()`
 - **MongoDB/Redis connection fails silently** — Set `failOnPrimaryError: true` (default) to surface connection errors, or check `connect()` return value for `{ connected, total }`.
 - **Data not synced across drivers** — Ensure `writeAll: true` (default). For existing data, use `db.migrate()` or `db.syncAll()`.
 - **Stale reads after failover** — The fallback driver may have older data. Use `db.syncAll()` after the primary recovers.
+- **`SQLITE_BUSY` / `database is locked`** — Another writer held the SQLite lock longer than the retry budget. Confirm one local filesystem (not NFS), look for long migrations/external SQLite tools, then raise `busyTimeoutMs` / `busyRetry.maxAttempts` only for transient contention. Sustained multi-writer load needs a client-server DB.
+- **DeepBase timeout did not stop a SQLite write** — `Promise.race()` ignores the original promise; `better-sqlite3` waits synchronously up to `busyTimeoutMs` and cannot be interrupted by `writeTimeout`. Bound lock waits on `SqliteDriver`, not only on DeepBase timeouts.
 
-## SqliteDriver Pragma Modes
+## SqliteDriver
+
+### Pragma modes
 
 `SqliteDriver` accepts a `pragma` option that controls performance vs. durability:
 
@@ -319,6 +326,8 @@ All methods listed in `DeepBaseDriver` must be implemented. `keys()`, `values()`
 | `safe` | Apps where data integrity matters more than speed (WAL + `synchronous=FULL`) |
 | `balanced` *(default)* | Recommended for most apps — fast writes with WAL + `synchronous=NORMAL` |
 | `fast` | Maximum throughput — risk of data loss on OS crash (`synchronous=OFF`) |
+
+Lock waiting is configured separately via `busyTimeoutMs` (also applies to `pragma: 'none'`).
 
 ```javascript
 // Default (balanced) — just omit pragma
@@ -336,9 +345,39 @@ new SqliteDriver({
 })
 ```
 
-SQLite drivers use independent connections and coordinate same-host processes
-with `BEGIN IMMEDIATE` plus bounded retries. WAL does not support shared
-database files across multiple hosts or NFS.
+Defaults: `busyTimeoutMs: 5000`, `busyRetry: { maxAttempts: 2, baseDelayMs: 25, maxDelayMs: 250 }` (~two native waits plus short async backoff).
+
+### Multi-process concurrency (same host)
+
+There is **no object singleton** anymore. Each `SqliteDriver` owns an independent connection and lifecycle; disconnecting one instance does not close another.
+
+Same-host writers are coordinated by SQLite:
+
+1. Writes use `BEGIN IMMEDIATE` (lock acquired before reads/callbacks).
+2. Contending writers wait up to `busyTimeoutMs` per attempt.
+3. Failed busy transactions retry with exponential backoff (`busyRetry`).
+4. Exhausted budget surfaces `SQLITE_BUSY`.
+
+Reads can proceed while another process writes (WAL). SQLite still allows **only one writer at a time**.
+
+```javascript
+// Process A and Process B may both open the same file safely on one host
+const db = new DeepBase(new SqliteDriver({ path: './data', name: 'app' }));
+await db.set('counter', 0);
+await db.inc('counter', 1); // waits/retries if the other process holds the write lock
+```
+
+Limits:
+
+- Same host + local disk only — not NFS, not multi-host shared files.
+- Native lock waits block that Node.js thread for up to `busyTimeoutMs`.
+- For sustained write contention or multi-host writers, use MongoDB/Redis/Postgres.
+
+### Schema / `seq` migration
+
+`seq` is assigned in SQL (`MAX(seq)+1`) under the write lock, with a unique index. On connect, legacy DBs migrate automatically inside an atomic `BEGIN IMMEDIATE` transaction (add `seq`, normalize duplicates/`0`, bump schema version). Preserve order `ORDER BY seq, key`.
+
+When upgrading from an older DeepBase that used an in-memory sequence counter: **stop all old writer processes before starting the new version**. Do not mix old and new allocators during a rolling deploy.
 
 Benchmark gains of `balanced` vs `none`: **+1772%** write, **+2187%** batch write, **29% smaller** disk (compacted). All modes pass the full test suite.
 
