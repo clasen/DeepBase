@@ -172,25 +172,26 @@ function publishPackages(dryRun = false) {
   log('\n✅ All packages published!', 'green');
 }
 
-function gitCommitAndTag(version) {
-  log('\n📝 Creating commit and tag in git...', 'cyan');
-  
-  try {
-    // Add all package.json changes
-    exec('git add package.json packages/*/package.json');
-    
-    // Commit
-    exec(`git commit -m "chore: release v${version}"`);
-    log('  ✓ Commit created', 'green');
-    
-    // Create tag
-    exec(`git tag -a v${version} -m "Release v${version}"`);
-    log(`  ✓ Tag v${version} created`, 'green');
-    
-    log('\n💡 Don\'t forget to run: git push && git push --tags', 'yellow');
-  } catch (error) {
-    log('  ⚠️  Git error (might already be committed)', 'yellow');
-  }
+function gitCommitPushAndTag(version) {
+  log('\n📝 Creating commit, tag and pushing to git...', 'cyan');
+
+  // Add all package.json changes
+  exec('git add package.json packages/*/package.json');
+
+  // Commit
+  exec(`git commit -m "chore: release v${version}"`);
+  log('  ✓ Commit created', 'green');
+
+  // Create tag
+  exec(`git tag -a v${version} -m "Release v${version}"`);
+  log(`  ✓ Tag v${version} created`, 'green');
+
+  // Push commit and tags
+  exec('git push');
+  log('  ✓ Commit pushed', 'green');
+
+  exec('git push --tags');
+  log('  ✓ Tags pushed', 'green');
 }
 
 function showCurrentVersions() {
@@ -299,35 +300,37 @@ async function main() {
   }
   
   try {
-    // Update versions
+    // 1. Update versions
     updateAllVersions(newVersion);
-    
-    // Run tests
+
+    // 2. Run tests
     if (!skipTests) {
       runTests();
     } else {
       log('\n⚠️  Skipping tests (--skip-tests)', 'yellow');
     }
-    
-    // Publish packages
-    publishPackages(dryRun);
-    
-    // Git commit and tag
+
+    // 3. Git commit, tag and push (before npm publish)
     if (!dryRun && !skipGit) {
-      gitCommitAndTag(newVersion);
+      gitCommitPushAndTag(newVersion);
+    } else if (dryRun) {
+      log('\n⚠️  Skipping git commit/push (--dry-run)', 'yellow');
+    } else {
+      log('\n⚠️  Skipping git commit/push (--skip-git)', 'yellow');
     }
-    
+
+    // 4. Publish packages to npm
+    publishPackages(dryRun);
+
     log('\n═══════════════════════════════════════════════════════', 'bright');
     log('  ✅ Publishing completed successfully!', 'green');
     log('═══════════════════════════════════════════════════════', 'bright');
-    
+
     if (!dryRun) {
       log('\n📝 Next steps:', 'cyan');
-      log('  1. git push', 'blue');
-      log('  2. git push --tags', 'blue');
-      log('  3. Verify on npmjs.com that packages were published', 'blue');
+      log('  1. Verify on npmjs.com that packages were published', 'blue');
     }
-    
+
   } catch (error) {
     log('\n═══════════════════════════════════════════════════════', 'bright');
     log('  ❌ Error during publishing', 'red');
@@ -356,7 +359,7 @@ Versions:
 Options:
   --dry-run          Simulate publishing without actually publishing
   --skip-tests       Skip running tests
-  --skip-git         Don't create commit or tag in git
+  --skip-git         Don't create commit, tag or push in git
   --help, -h         Show this help
 
 Examples:
@@ -369,8 +372,8 @@ The script:
   1. Updates versions in all package.json files
   2. Updates dependencies between packages
   3. Runs tests (optional)
-  4. Publishes packages in correct order
-  5. Creates commit and tag in git (optional)
+  4. Creates commit, tag and pushes to git
+  5. Publishes packages to npm in correct order
 `);
   process.exit(0);
 }
