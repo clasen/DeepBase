@@ -3,7 +3,6 @@ import { fork } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import Database from 'better-sqlite3';
 import { SqliteDriver } from '../src/SqliteDriver.js';
 import { createLegacyDatabase, createSequencedDatabase, inspectDatabase } from './fixtures.js';
 
@@ -93,7 +92,7 @@ describe('SqliteDriver multi-process safety', function () {
     await driver.disconnect();
   });
 
-  it('migrates a legacy database without seq and preserves observable order', async function () {
+  it('adds a missing seq column without rewriting legacy rows', async function () {
     const name = 'legacy-no-seq';
     const fileName = path.join(testDataPath, `${name}.db`);
     createLegacyDatabase(fileName, [['b', 2], ['a', 1]]);
@@ -104,14 +103,13 @@ describe('SqliteDriver multi-process safety', function () {
 
     const state = inspectDatabase(fileName);
     assert.deepStrictEqual(state.rows, [
-      { key: 'a', seq: 1 },
-      { key: 'b', seq: 2 },
+      { key: 'a', seq: 0 },
+      { key: 'b', seq: 0 },
     ]);
-    assert.strictEqual(state.schemaVersion, 1);
-    assert.ok(state.indexes.some(index => index.name === 'deepbase_seq_unique' && index.unique === 1));
+    assert.ok(state.indexes.some(index => index.name === 'deepbase_seq_idx' && index.unique === 0));
   });
 
-  it('normalizes duplicate seq values without changing their current order', async function () {
+  it('preserves duplicate historical seq values and their stable key order', async function () {
     const name = 'duplicate-seq';
     const fileName = path.join(testDataPath, `${name}.db`);
     createSequencedDatabase(fileName, [
@@ -126,41 +124,14 @@ describe('SqliteDriver multi-process safety', function () {
     await driver.disconnect();
 
     assert.deepStrictEqual(inspectDatabase(fileName).rows, [
-      { key: 'a', seq: 1 },
-      { key: 'b', seq: 2 },
-      { key: 'c', seq: 3 },
-      { key: 'd', seq: 4 },
-    ]);
-  });
-
-  it('rolls back the complete migration when normalization fails', async function () {
-    const name = 'migration-rollback';
-    const fileName = path.join(testDataPath, `${name}.db`);
-    createSequencedDatabase(fileName, [['a', 1, 0], ['b', 2, 0]], { failMigration: true });
-
-    const driver = new SqliteDriver({ name, path: testDataPath, ...retryOptions });
-    await assert.rejects(driver.connect(), /forced migration failure/);
-
-    const failedState = inspectDatabase(fileName);
-    assert.deepStrictEqual(failedState.rows, [
       { key: 'a', seq: 0 },
       { key: 'b', seq: 0 },
-    ]);
-    assert.strictEqual(failedState.schemaVersion, undefined);
-
-    const raw = new Database(fileName);
-    raw.exec('DROP TRIGGER fail_seq_migration');
-    raw.close();
-
-    await driver.connect();
-    await driver.disconnect();
-    assert.deepStrictEqual(inspectDatabase(fileName).rows, [
-      { key: 'a', seq: 1 },
-      { key: 'b', seq: 2 },
+      { key: 'c', seq: 2 },
+      { key: 'd', seq: 2 },
     ]);
   });
 
-  it('serializes concurrent schema migration across processes', async function () {
+  it('serializes concurrent schema setup across processes', async function () {
     const name = 'concurrent-migration';
     const fileName = path.join(testDataPath, `${name}.db`);
     createLegacyDatabase(fileName, [['value', 1]]);
@@ -176,8 +147,8 @@ describe('SqliteDriver multi-process safety', function () {
     ));
 
     const state = inspectDatabase(fileName);
-    assert.strictEqual(state.schemaVersion, 1);
-    assert.deepStrictEqual(state.rows, [{ key: 'value', seq: 1 }]);
+    assert.deepStrictEqual(state.rows, [{ key: 'value', seq: 0 }]);
+    assert.ok(state.indexes.some(index => index.name === 'deepbase_seq_idx'));
   });
 
   it('keeps increments atomic across processes', async function () {

@@ -187,7 +187,7 @@ Follow these rules when generating DeepBase code:
 10. **Prefer `deepbase-redis-json` over `deepbase-redis`** when working with Redis Stack, as it supports native JSON operations.
 11. **SQLite same-host writers are safe by default.** Multiple processes may open the same `.db` file; writers wait/retry via `BEGIN IMMEDIATE` + `busyTimeoutMs` / `busyRetry`. Keep one writer process per host when contention is sustained.
 12. **Never put SQLite on NFS or share one file across hosts.** WAL requires a local filesystem on a single host. For multi-host writers, use MongoDB/Redis/Postgres instead.
-13. **Stop old SQLite writers before upgrading.** Schema/`seq` migration is automatic, but do not run old in-memory-seq binaries and new SQL-seq binaries against the same file at once.
+13. **Stop old SQLite writers before upgrading.** Do not run old in-memory-seq binaries and new SQL-seq binaries against the same file at once.
 
 ## Examples
 
@@ -373,9 +373,9 @@ Limits:
 - Native lock waits block that Node.js thread for up to `busyTimeoutMs`.
 - For sustained write contention or multi-host writers, use MongoDB/Redis/Postgres.
 
-### Schema / `seq` migration
+### Schema / `seq`
 
-`seq` is assigned in SQL (`MAX(seq)+1`) under the write lock, with a unique index. On connect, legacy DBs migrate automatically inside an atomic `BEGIN IMMEDIATE` transaction (add `seq`, normalize duplicates/`0`, bump schema version). Preserve order `ORDER BY seq, key`.
+`seq` is assigned in SQL (`MAX(seq)+1`) under the write lock and indexed for fast ordering. Schema setup is intentionally minimal: create the table, add `seq` when a legacy DB lacks it, and create a non-unique index. Existing `seq` values are never renumbered; historical ties remain stable through `ORDER BY seq, key`.
 
 When upgrading from an older DeepBase that used an in-memory sequence counter: **stop all old writer processes before starting the new version**. Do not mix old and new allocators during a rolling deploy.
 

@@ -13,7 +13,7 @@ export function createLegacyDatabase(fileName, rows) {
   db.close();
 }
 
-export function createSequencedDatabase(fileName, rows, { failMigration = false } = {}) {
+export function createSequencedDatabase(fileName, rows) {
   const db = new Database(fileName);
   db.exec(`
     CREATE TABLE deepbase (
@@ -29,16 +29,6 @@ export function createSequencedDatabase(fileName, rows, { failMigration = false 
     }
   });
   insertRows(rows);
-
-  if (failMigration) {
-    db.exec(`
-      CREATE TRIGGER fail_seq_migration
-      BEFORE UPDATE OF seq ON deepbase
-      BEGIN
-        SELECT RAISE(ABORT, 'forced migration failure');
-      END
-    `);
-  }
   db.close();
 }
 
@@ -46,12 +36,6 @@ export function inspectDatabase(fileName) {
   const db = new Database(fileName);
   const rows = db.prepare('SELECT key, seq FROM deepbase ORDER BY seq, key').all();
   const indexes = db.prepare("PRAGMA index_list('deepbase')").all();
-  const metaTable = db.prepare(
-    "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'deepbase_meta'",
-  ).get();
-  const schemaVersion = metaTable
-    ? db.prepare("SELECT value FROM deepbase_meta WHERE key = 'schema_version'").get()?.value
-    : undefined;
   db.close();
-  return { rows, indexes, schemaVersion };
+  return { rows, indexes };
 }

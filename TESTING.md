@@ -144,7 +144,7 @@ Tests the JSON filesystem driver:
 ### deepbase-sqlite
 
 Tests the SQLite driver across all PRAGMA profiles, including nested data,
-atomic updates, independent connection lifecycle, automatic schema migration,
+atomic updates, independent connection lifecycle, minimal legacy schema setup,
 bounded lock retries, and real same-host concurrency using child processes.
 
 ```bash

@@ -29,8 +29,8 @@ benchmarks/
 |------------|-------|--------|
 | Core | 48 | ✓ Passing |
 | JSON Driver | 55 | ✓ Passing |
-| **SQLite Driver** | **306** | **✓ Passing** |
-| **Total** | **409** | **✓ All Pass** |
+| **SQLite Driver** | **305** | **✓ Passing** |
+| **Total** | **408** | **✓ All Pass** |
 
 #### SQLite Driver Test Coverage
 
@@ -132,7 +132,7 @@ benchmarks/
    - Independent connections per driver instance
    - `BEGIN IMMEDIATE` write transactions
    - Bounded `SQLITE_BUSY*` retries
-   - Database-assigned unique sequence ordering
+   - Database-assigned sequence ordering with stable key fallback
 
 5. **Complete API**
    - All DeepBase operations supported
@@ -284,7 +284,7 @@ await db.disconnect();
 
 The SQLite driver for DeepBase is **fully implemented, tested, and benchmarked**. It provides:
 
-- ✓ **306 SQLite tests** - functional, migration, and multi-process suites passing
+- ✓ **305 SQLite tests** - functional, schema, and multi-process suites passing
 - ✓ **Excellent performance** - especially in UPDATE operations
 - ✓ **ACID compliance** - reliable data storage
 - ✓ **Complete feature set** - all DeepBase operations

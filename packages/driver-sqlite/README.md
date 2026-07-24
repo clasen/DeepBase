@@ -82,7 +82,7 @@ const db2 = new DeepBase(new SqliteDriver({ name: 'mydb' }));
 
 SQLite still permits only one writer at a time. Keep write transactions short and use a client-server database when sustained write contention or multiple hosts are required. WAL requires a local filesystem shared by processes on the same host; do not place the database on NFS.
 
-When upgrading from a version that used the in-memory sequence counter, stop all old writer processes before starting the new version. The schema migration is automatic, but old and new sequence allocators must not write concurrently during a rolling deployment.
+When upgrading from a version that used the in-memory sequence counter, stop all old writer processes before starting the new version. Old and new sequence allocators must not write concurrently during a rolling deployment.
 
 ### Nested Data Structure
 
@@ -92,7 +92,7 @@ Efficiently stores nested objects using a key-value schema:
 - Values are stored as JSON
 - Fast lookups for both exact keys and partial paths
 
-Each row also stores a monotonic, database-assigned `seq` so reads that rebuild objects use `ORDER BY seq, key`. That matches JavaScript insertion order for sibling keys and keeps `shift()` / `pop()` aligned with `JsonDriver`. Existing databases migrate automatically inside an atomic `BEGIN IMMEDIATE` transaction. Legacy and duplicate sequence values are normalized while preserving their previous `ORDER BY seq, key` order.
+Each row also stores a database-assigned `seq` so reads that rebuild objects use `ORDER BY seq, key`. That matches JavaScript insertion order for sibling keys and keeps `shift()` / `pop()` aligned with `JsonDriver`. For legacy databases, the driver only adds the missing column and index; it does not renumber existing rows. Historical ties remain deterministic through the `key` fallback order.
 
 ### ACID Compliance
 
@@ -148,15 +148,10 @@ CREATE TABLE deepbase (
   seq INTEGER NOT NULL
 );
 
-CREATE UNIQUE INDEX deepbase_seq_unique ON deepbase(seq);
-
-CREATE TABLE deepbase_meta (
-  key TEXT PRIMARY KEY,
-  value INTEGER NOT NULL
-);
+CREATE INDEX deepbase_seq_idx ON deepbase(seq);
 ```
 
-`deepbase_meta` is always created `WITHOUT ROWID`; optimized PRAGMA profiles do the same for `deepbase`. The metadata table tracks the internal schema version, while user data remains exclusively in `deepbase`.
+Optimized PRAGMA profiles create `deepbase` `WITHOUT ROWID`.
 
 Example data:
 

@@ -4,7 +4,7 @@ import fs from 'fs';
 import * as pathModule from 'path';
 import { withBusyRetry } from './busy.js';
 import { resolveSqliteConfig } from './config.js';
-import { migrateSchema } from './schema.js';
+import { ensureSchema } from './schema.js';
 
 export class SqliteDriver extends DeepBaseDriver {
   constructor({ name, path, pragma, busyTimeoutMs, busyRetry, ...opts } = {}) {
@@ -61,7 +61,7 @@ export class SqliteDriver extends DeepBaseDriver {
     }
 
     const withoutRowid = cfg ? ' WITHOUT ROWID' : '';
-    migrateSchema(this.db, { withoutRowid });
+    ensureSchema(this.db, { withoutRowid });
 
     this.getStmt = this.db.prepare('SELECT value FROM deepbase WHERE key = ?');
     this.setStmt = this.db.prepare(`

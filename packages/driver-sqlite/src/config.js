@@ -25,7 +25,6 @@ const PRAGMA_PROFILES = Object.freeze({
 
 export const SQLITE_CONFIG = Object.freeze({
   defaultPragma: 'balanced',
-  schemaVersion: 1,
   busyTimeoutMs: 5000,
   busyRetry: Object.freeze({
     maxAttempts: 2,
