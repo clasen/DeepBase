@@ -176,7 +176,7 @@ new DeepBase(drivers, {
 Follow these rules when generating DeepBase code:
 
 1. **Check before installing.** Verify `package.json` for existing `deepbase` dependency before running `npm install`.
-2. **Use the official API.** Never manipulate driver internals or the underlying JSON/SQLite/Mongo storage directly. Always go through `db.get()`, `db.set()`, etc.
+2. **Use the official API.** Never manipulate driver internals or the underlying JSON/SQLite/Mongo storage directly. Always go through `db.get()`, `db.set()`, etc., or the documented driver methods reached via `getDriver(index)` (e.g. `backup()`).
 3. **Prefer lazy connect.** Do not call `db.connect()` explicitly unless you need the `{ connected, total }` result. Lazy connect handles it automatically.
 4. **Always `disconnect()` on shutdown.** Especially important for MongoDB and Redis drivers to release connections.
 5. **Use `add()` for auto-IDs.** Do not manually generate IDs with nanoid/uuid — `add()` returns the full path array including the generated ID.
@@ -188,6 +188,7 @@ Follow these rules when generating DeepBase code:
 11. **SQLite same-host writers are safe by default.** Multiple processes may open the same `.db` file; writers wait/retry via `BEGIN IMMEDIATE` + `busyTimeoutMs` / `busyRetry`. Keep one writer process per host when contention is sustained.
 12. **Never put SQLite on NFS or share one file across hosts.** WAL requires a local filesystem on a single host. For multi-host writers, use MongoDB/Redis/Postgres instead.
 13. **Stop old SQLite writers before upgrading.** Do not run old in-memory-seq binaries and new SQL-seq binaries against the same file at once.
+14. **Never install `better-sqlite3` alongside `deepbase-sqlite`.** SQLite maintenance lives on the driver: `backup()`, `checkIntegrity()`, `vacuum()`, `checkpoint()`. A second copy of the native module invites a version mismatch with the driver's.
 
 ## Examples
 
@@ -372,6 +373,25 @@ Limits:
 - Same host + local disk only — not NFS, not multi-host shared files.
 - Native lock waits block that Node.js thread for up to `busyTimeoutMs`.
 - For sustained write contention or multi-host writers, use MongoDB/Redis/Postgres.
+
+### Maintenance
+
+`SqliteDriver` exposes maintenance on the driver itself, so **never add `better-sqlite3` to the app's dependencies** — a second copy risks a version mismatch with the driver's native binding.
+
+```javascript
+const driver = db.getDriver(0);
+
+const status = await driver.checkIntegrity();  // 'ok', or SQLite's description of the damage
+await driver.backup('./backups/app-2026-07-28.db');
+await driver.vacuum();
+await driver.checkpoint('TRUNCATE');           // PASSIVE (default) | FULL | RESTART | TRUNCATE
+```
+
+`backup()` writes an online copy (creating parent directories), verifies it with `integrity_check`, and resolves with the destination path. It rejects with code `DEEPBASE_SQLITE_BACKUP_CORRUPT` if the copy fails to verify, leaving the bad file on disk for inspection — so a restore routine must never pick a backup by timestamp alone. The copy is consistent with concurrent writes and does not block the driver's write queue.
+
+`vacuum()` and `checkpoint()` take the write lock, queue behind the driver's own writes, and should run when the app is idle. `checkpoint()` rejects with `DEEPBASE_SQLITE_NOT_WAL` under `pragma: 'none'` (rollback journal, no WAL).
+
+Retention, rotation and scheduling belong to the application, not the driver.
 
 ### Schema / `seq`
 

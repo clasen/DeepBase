@@ -728,5 +728,127 @@ for (const pragma of PRAGMA_MODES) {
         assert.strictEqual(await db.get('inventory'), 500);
       });
     });
+
+    describe('Maintenance', function () {
+      it('reports a healthy database as ok', async function () {
+        await db.set('key', 'value');
+        assert.strictEqual(await db.getDriver(0).checkIntegrity(), 'ok');
+      });
+
+      it('backs up to a verified copy containing the data', async function () {
+        await db.set('users', 'alice', { name: 'Alice' });
+        const destination = path.join(testDataPath, 'backups', `backup-${pragma}.db`);
+
+        assert.strictEqual(await db.getDriver(0).backup(destination), destination);
+
+        const copy = new DeepBase(new SqliteDriver({
+          name: `backup-${pragma}`,
+          path: path.join(testDataPath, 'backups'),
+          pragma,
+        }));
+        assert.deepStrictEqual(await copy.get('users', 'alice'), { name: 'Alice' });
+        await copy.disconnect();
+      });
+
+      it('creates missing parent directories for the destination', async function () {
+        const destination = path.join(testDataPath, 'deep', 'nested', 'backup.db');
+        await db.getDriver(0).backup(destination);
+        assert.ok(fs.existsSync(destination));
+      });
+
+      it('includes writes made after the driver opened the connection', async function () {
+        await db.set('counter', 41);
+        await db.inc('counter', 1);
+        const destination = path.join(testDataPath, 'backups', `late-${pragma}.db`);
+        await db.getDriver(0).backup(destination);
+
+        const copy = new DeepBase(new SqliteDriver({
+          name: `late-${pragma}`,
+          path: path.join(testDataPath, 'backups'),
+          pragma,
+        }));
+        assert.strictEqual(await copy.get('counter'), 42);
+        await copy.disconnect();
+      });
+
+      it('opens the connection on demand', async function () {
+        const driver = new SqliteDriver({ name: `lazy-${pragma}`, path: testDataPath, pragma });
+        assert.strictEqual(await driver.checkIntegrity(), 'ok');
+        await driver.disconnect();
+      });
+
+      it('vacuums without losing data', async function () {
+        for (let i = 0; i < 50; i++) {
+          await db.set('users', `user${i}`, { name: `User ${i}` });
+        }
+        await db.del('users', 'user0');
+
+        await db.getDriver(0).vacuum();
+
+        assert.strictEqual(await db.get('users', 'user0'), null);
+        assert.deepStrictEqual(await db.get('users', 'user49'), { name: 'User 49' });
+        assert.strictEqual(await db.getDriver(0).checkIntegrity(), 'ok');
+      });
+
+      it('rejects an unknown checkpoint mode', async function () {
+        await assert.rejects(db.getDriver(0).checkpoint('SOMETIMES'), TypeError);
+      });
+
+      if (pragma === 'none') {
+        it('refuses to checkpoint a rollback-journal database', async function () {
+          await db.set('key', 'value');
+          await assert.rejects(
+            db.getDriver(0).checkpoint(),
+            error => error.code === 'DEEPBASE_SQLITE_NOT_WAL',
+          );
+        });
+      } else {
+        it('checkpoints the WAL back into the database file', async function () {
+          await db.set('key', 'value');
+          const result = await db.getDriver(0).checkpoint('TRUNCATE');
+          assert.strictEqual(result.busy, 0);
+          assert.strictEqual(result.log, 0, 'TRUNCATE leaves an empty WAL');
+          assert.strictEqual(await db.get('key'), 'value');
+        });
+      }
+    });
   });
 }
+
+describe('SqliteDriver backup verification', function () {
+  const corruptPath = path.join(testDataPath, 'corrupt');
+
+  afterEach(function () {
+    if (fs.existsSync(testDataPath)) {
+      fs.rmSync(testDataPath, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects when the written copy does not verify', async function () {
+    const driver = new SqliteDriver({ name: 'source', path: corruptPath });
+    for (let i = 0; i < 200; i++) {
+      await driver.set('users', `user${i}`, { name: `User ${i}` });
+    }
+
+    const destination = path.join(corruptPath, 'backup.db');
+    const originalBackup = driver.db.backup.bind(driver.db);
+    driver.db.backup = async dest => {
+      const result = await originalBackup(dest);
+      // Scribble over every page but the header, so the file still opens as a
+      // database yet fails integrity_check.
+      const handle = fs.openSync(dest, 'r+');
+      const damaged = fs.fstatSync(handle).size - 4096;
+      fs.writeSync(handle, Buffer.alloc(damaged, 0xff), 0, damaged, 4096);
+      fs.closeSync(handle);
+      return result;
+    };
+
+    await assert.rejects(
+      driver.backup(destination),
+      error => error.code === 'DEEPBASE_SQLITE_BACKUP_CORRUPT',
+    );
+    assert.ok(fs.existsSync(destination), 'corrupt copy is left in place for inspection');
+
+    await driver.disconnect();
+  });
+});

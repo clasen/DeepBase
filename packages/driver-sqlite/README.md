@@ -84,6 +84,44 @@ SQLite still permits only one writer at a time. Keep write transactions short an
 
 When upgrading from a version that used the in-memory sequence counter, stop all old writer processes before starting the new version. Old and new sequence allocators must not write concurrently during a rolling deployment.
 
+### Maintenance
+
+The driver owns the `better-sqlite3` connection and exposes maintenance through
+its own API, so a backup or vacuum job needs no `better-sqlite3` entry in your
+own `package.json`. That keeps a single native binding in the tree and removes
+any chance of a version mismatch between your copy and the driver's.
+
+```javascript
+const driver = db.getDriver(0);
+
+const status = await driver.checkIntegrity();     // 'ok', or what SQLite found
+await driver.backup('./backups/mydb-2026-07-28.db');
+await driver.vacuum();
+await driver.checkpoint('TRUNCATE');
+```
+
+| Method | Behaviour |
+|--------|-----------|
+| `checkIntegrity()` | Runs `PRAGMA integrity_check` and returns its status verbatim. |
+| `backup(destination)` | Online copy, verified before it resolves. Returns `destination`. |
+| `vacuum()` | Rebuilds the file to reclaim free pages. |
+| `checkpoint(mode)` | `PASSIVE` (default), `FULL`, `RESTART` or `TRUNCATE`. Returns `{ busy, log, checkpointed }`. |
+
+`backup()` creates parent directories as needed, then reopens the result and
+verifies it with `integrity_check` — a backup nobody validated is not a backup.
+It rejects with code `DEEPBASE_SQLITE_BACKUP_CORRUPT` when the copy fails to
+verify, leaving the bad file on disk for inspection, so a restore routine must
+never pick a backup by timestamp alone. The copy is consistent with writes that
+land while it runs, and it does not block the driver's write queue.
+
+`vacuum()` and `checkpoint()` do take the write lock, so they queue behind the
+driver's own writes and honour `busyRetry`. Run them when the application is
+idle. `checkpoint()` rejects with code `DEEPBASE_SQLITE_NOT_WAL` on databases
+opened with `pragma: 'none'`, which use a rollback journal and have no WAL.
+
+Retention, rotation and scheduling stay in your application — the driver takes a
+verified snapshot, nothing more.
+
 ### Nested Data Structure
 
 Efficiently stores nested objects using a key-value schema:

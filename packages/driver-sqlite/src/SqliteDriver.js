@@ -4,6 +4,7 @@ import fs from 'fs';
 import * as pathModule from 'path';
 import { withBusyRetry } from './busy.js';
 import { resolveSqliteConfig } from './config.js';
+import { backupTo, checkIntegrity, checkpoint, vacuum } from './maintenance.js';
 import { ensureSchema } from './schema.js';
 
 export class SqliteDriver extends DeepBaseDriver {
@@ -120,6 +121,24 @@ export class SqliteDriver extends DeepBaseDriver {
     this._clearTxn = (...args) => clearTxn.immediate(...args);
 
     this._connected = true;
+  }
+
+  async checkIntegrity() {
+    await this.connect();
+    return checkIntegrity(this.db);
+  }
+
+  async backup(destination) {
+    await this.connect();
+    return backupTo(this.db, destination);
+  }
+
+  async vacuum() {
+    return this._runWrite(() => vacuum(this.db));
+  }
+
+  async checkpoint(mode = 'PASSIVE') {
+    return this._runWrite(() => checkpoint(this.db, mode));
   }
 
   async connect() {

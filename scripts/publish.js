@@ -175,8 +175,8 @@ function publishPackages(dryRun = false) {
 function gitCommitPushAndTag(version) {
   log('\n📝 Creating commit, tag and pushing to git...', 'cyan');
 
-  // Add all package.json changes
-  exec('git add package.json packages/*/package.json');
+  // Stage everything: pnpm publish refuses to run on an unclean working tree
+  exec('git add -A');
 
   // Commit
   exec(`git commit -m "chore: release v${version}"`);
