@@ -387,7 +387,7 @@ await driver.vacuum();
 await driver.checkpoint('TRUNCATE');           // PASSIVE (default) | FULL | RESTART | TRUNCATE
 ```
 
-`backup()` writes an online copy (creating parent directories), verifies it with `integrity_check`, and resolves with the destination path. It rejects with code `DEEPBASE_SQLITE_BACKUP_CORRUPT` if the copy fails to verify, leaving the bad file on disk for inspection — so a restore routine must never pick a backup by timestamp alone. The copy is consistent with concurrent writes and does not block the driver's write queue.
+`checkIntegrity()` and `backup()` open the existing source with a temporary read-only connection (`fileMustExist: true`), so they never create, migrate, or change PRAGMAs on it. `backup()` creates destination parent directories, writes an online copy, verifies it with `integrity_check`, and resolves with the destination path. It rejects with code `DEEPBASE_SQLITE_BACKUP_CORRUPT` if the copy fails to verify, leaving the bad file on disk for inspection — so a restore routine must never pick a backup by timestamp alone. The copy is consistent with concurrent writes and does not block the driver's write queue.
 
 `vacuum()` and `checkpoint()` take the write lock, queue behind the driver's own writes, and should run when the app is idle. `checkpoint()` rejects with `DEEPBASE_SQLITE_NOT_WAL` under `pragma: 'none'` (rollback journal, no WAL).
 

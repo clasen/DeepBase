@@ -102,12 +102,16 @@ await driver.checkpoint('TRUNCATE');
 
 | Method | Behaviour |
 |--------|-----------|
-| `checkIntegrity()` | Runs `PRAGMA integrity_check` and returns its status verbatim. |
-| `backup(destination)` | Online copy, verified before it resolves. Returns `destination`. |
+| `checkIntegrity()` | Read-only `PRAGMA integrity_check`; returns its status verbatim. |
+| `backup(destination)` | Read-only source, online copy, verified before it resolves. Returns `destination`. |
 | `vacuum()` | Rebuilds the file to reclaim free pages. |
 | `checkpoint(mode)` | `PASSIVE` (default), `FULL`, `RESTART` or `TRUNCATE`. Returns `{ busy, log, checkpointed }`. |
 
-`backup()` creates parent directories as needed, then reopens the result and
+`checkIntegrity()` and `backup()` open a temporary read-only connection with
+`fileMustExist: true`, then close it. They never create, migrate, or change
+PRAGMAs on the source database; a missing or mistyped source path fails instead
+of producing an empty database. `backup()` creates destination parent
+directories only after opening the source, then reopens the result read-only and
 verifies it with `integrity_check` — a backup nobody validated is not a backup.
 It rejects with code `DEEPBASE_SQLITE_BACKUP_CORRUPT` when the copy fails to
 verify, leaving the bad file on disk for inspection, so a restore routine must

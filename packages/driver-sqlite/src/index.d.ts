@@ -35,15 +35,15 @@ export class SqliteDriver extends DeepBaseDriver {
     busyTimeoutMs: number;
     busyRetry: Required<SqliteBusyRetryOptions>;
 
-    /** Runs `PRAGMA integrity_check` and returns its status: `'ok'` when the
-     *  database is sound, otherwise SQLite's description of the damage. */
+    /** Opens the existing database read-only, runs `PRAGMA integrity_check`,
+     *  then closes it. Does not connect or mutate the driver database. */
     checkIntegrity(): Promise<string>;
 
     /**
-     * Writes an online backup to `destination`, creating parent directories as
-     * needed, then verifies the copy with `integrity_check`. Resolves with
-     * `destination`, or rejects with code `DEEPBASE_SQLITE_BACKUP_CORRUPT` when
-     * the copy does not verify.
+     * Opens the existing source database read-only, writes an online backup to
+     * `destination`, then verifies the copy with `integrity_check`. Resolves
+     * with `destination`, or rejects with code
+     * `DEEPBASE_SQLITE_BACKUP_CORRUPT` when the copy does not verify.
      */
     backup(destination: string): Promise<string>;
 

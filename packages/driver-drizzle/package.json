@@ -1,6 +1,6 @@
 {
   "name": "deepbase-drizzle",
-  "version": "3.8.0",
+  "version": "3.8.1",
   "description": "DeepBase driver for Drizzle ORM (bring your own database client + schema)",
   "type": "module",
   "main": "src/index.cjs",
@@ -14,7 +14,7 @@
     }
   },
   "peerDependencies": {
-    "deepbase": "^3.8.0"
+    "deepbase": "^3.8.1"
   },
   "scripts": {
     "test": "mocha test/test.js"

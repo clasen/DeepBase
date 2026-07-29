@@ -4,23 +4,37 @@ import * as pathModule from 'path';
 
 const CHECKPOINT_MODES = ['PASSIVE', 'FULL', 'RESTART', 'TRUNCATE'];
 
-export function checkIntegrity(db) {
+function checkIntegrity(db) {
   return db.pragma('integrity_check', { simple: true });
 }
 
-export async function backupTo(db, destination) {
-  fs.mkdirSync(pathModule.dirname(pathModule.resolve(destination)), { recursive: true });
+function openReadonly(fileName, timeout) {
+  return new Database(fileName, {
+    readonly: true,
+    fileMustExist: true,
+    timeout,
+  });
+}
 
-  await db.backup(destination);
-
-  const copy = new Database(destination, { readonly: true });
-  let status;
+export function checkIntegrityAt(fileName, timeout) {
+  const db = openReadonly(fileName, timeout);
   try {
-    status = checkIntegrity(copy);
+    return checkIntegrity(db);
   } finally {
-    copy.close();
+    db.close();
+  }
+}
+
+export async function backupFrom(fileName, destination, timeout) {
+  const source = openReadonly(fileName, timeout);
+  try {
+    fs.mkdirSync(pathModule.dirname(pathModule.resolve(destination)), { recursive: true });
+    await source.backup(destination);
+  } finally {
+    source.close();
   }
 
+  const status = checkIntegrityAt(destination, timeout);
   if (status !== 'ok') {
     const error = new Error(
       `deepbase-sqlite: backup verification failed for ${destination}: ${status}. ` +

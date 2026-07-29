@@ -1,4 +1,5 @@
 import assert from 'assert';
+import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -771,10 +772,29 @@ for (const pragma of PRAGMA_MODES) {
         await copy.disconnect();
       });
 
-      it('opens the connection on demand', async function () {
-        const driver = new SqliteDriver({ name: `lazy-${pragma}`, path: testDataPath, pragma });
-        assert.strictEqual(await driver.checkIntegrity(), 'ok');
+      it('uses a temporary readonly connection', async function () {
+        await db.set('key', 'value');
+        const driver = db.getDriver(0);
         await driver.disconnect();
+
+        assert.strictEqual(await driver.checkIntegrity(), 'ok');
+        assert.strictEqual(driver._connected, false);
+        assert.strictEqual(driver.db, null);
+      });
+
+      it('does not create a missing source database or backup directory', async function () {
+        const driver = new SqliteDriver({
+          name: `missing-${pragma}`,
+          path: path.join(testDataPath, 'missing'),
+          pragma,
+        });
+        const destination = path.join(testDataPath, 'should-not-exist', 'backup.db');
+
+        await assert.rejects(driver.checkIntegrity());
+        await assert.rejects(driver.backup(destination));
+
+        assert.strictEqual(fs.existsSync(driver.fileName), false);
+        assert.strictEqual(fs.existsSync(path.dirname(destination)), false);
       });
 
       it('vacuums without losing data', async function () {
@@ -831,9 +851,9 @@ describe('SqliteDriver backup verification', function () {
     }
 
     const destination = path.join(corruptPath, 'backup.db');
-    const originalBackup = driver.db.backup.bind(driver.db);
-    driver.db.backup = async dest => {
-      const result = await originalBackup(dest);
+    const originalBackup = Database.prototype.backup;
+    Database.prototype.backup = async function (dest, ...args) {
+      const result = await originalBackup.call(this, dest, ...args);
       // Scribble over every page but the header, so the file still opens as a
       // database yet fails integrity_check.
       const handle = fs.openSync(dest, 'r+');
@@ -843,10 +863,14 @@ describe('SqliteDriver backup verification', function () {
       return result;
     };
 
-    await assert.rejects(
-      driver.backup(destination),
-      error => error.code === 'DEEPBASE_SQLITE_BACKUP_CORRUPT',
-    );
+    try {
+      await assert.rejects(
+        driver.backup(destination),
+        error => error.code === 'DEEPBASE_SQLITE_BACKUP_CORRUPT',
+      );
+    } finally {
+      Database.prototype.backup = originalBackup;
+    }
     assert.ok(fs.existsSync(destination), 'corrupt copy is left in place for inspection');
 
     await driver.disconnect();
