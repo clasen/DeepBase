@@ -7,7 +7,16 @@ import lockfile from 'proper-lockfile';
 export class JsonDriver extends DeepBaseDriver {
   static _instances = {};
   
-  constructor({name, path, stringify, parse, multiProcess, ...opts} = {}) {
+  constructor({
+    name,
+    path,
+    stringify,
+    parse,
+    multiProcess,
+    encodeForMemory,
+    decodeFromMemory,
+    ...opts
+  } = {}) {
     super(opts);
     
     this.name = name || "default";
@@ -15,6 +24,8 @@ export class JsonDriver extends DeepBaseDriver {
     this.stringify = stringify || ((obj) => JSON.stringify(obj, null, 4));
     this.parse = parse || JSON.parse;
     this.multiProcess = multiProcess || false;
+    this.encodeForMemory = encodeForMemory || (value => value);
+    this.decodeFromMemory = decodeFromMemory || (value => value);
     
     this.path = pathModule.resolve(this.path);
     this.fileName = pathModule.join(this.path, `${this.name}.json`);
@@ -31,11 +42,15 @@ export class JsonDriver extends DeepBaseDriver {
     // Queue for serializing concurrent operations
     this._operationQueue = Promise.resolve();
     this._queueLock = false;
+    this._disposing = false;
+    this._disposed = false;
+    this._disposePromise = null;
     
     JsonDriver._instances[this.fileName] = this;
   }
   
   _connectSync() {
+    this._assertUsable();
     if (this._connected) return;
 
     if (!fs.existsSync(this.path)) {
@@ -44,10 +59,11 @@ export class JsonDriver extends DeepBaseDriver {
 
     if (fs.existsSync(this.fileName)) {
       const fileContent = fs.readFileSync(this.fileName, "utf8");
-      this.obj = fileContent ? this.parse(fileContent) : {};
+      const parsed = fileContent ? this.parse(fileContent) : {};
+      this.obj = this._encodeForMemory(parsed, []);
     } else {
       // Create the file so proper-lockfile can lock it in multiProcess mode
-      fs.writeFileSync(this.fileName, this.stringify(this.obj));
+      fs.writeFileSync(this.fileName, this._serializeMemory());
     }
 
     this._connected = true;
@@ -58,19 +74,25 @@ export class JsonDriver extends DeepBaseDriver {
   }
   
   async disconnect() {
+    if (this._disposed) {
+      return;
+    }
+    if (this._disposePromise) {
+      return this._disposePromise;
+    }
+    await this._operationQueue;
     await this._saveToFile();
     this._connected = false;
   }
   
   async get(...args) {
+    this._assertUsable();
     // In multiProcess mode, re-read from disk for fresh data
     if (this.multiProcess) {
       this._refreshFromDisk();
     }
     const value = this._getRecursive(this.obj, args.slice());
-    return typeof value === 'object' && value !== null 
-      ? this.parse(this.stringify(value)) 
-      : value;
+    return this._decodeFromMemory(value, args);
   }
 
   getSync(...args) {
@@ -79,21 +101,20 @@ export class JsonDriver extends DeepBaseDriver {
     }
     this._connectSync();
     const value = this._getRecursive(this.obj, args.slice());
-    return typeof value === 'object' && value !== null
-      ? this.parse(this.stringify(value))
-      : value;
+    return this._decodeFromMemory(value, args);
   }
   
   async set(...args) {
     return this._queueOperation(async () => {
       if (args.length < 2) {
-        this.obj = args[0];
+        const value = this._encodeForMemory(args[0], []);
+        this.obj = value;
         await this._saveToFile();
         return [];
       }
       
       const keys = args.slice(0, -1);
-      const value = args[args.length - 1];
+      const value = this._encodeForMemory(args[args.length - 1], keys);
       
       // Make a copy to avoid modifying the original array
       this._setRecursive(this.obj, keys.slice(), value);
@@ -143,7 +164,8 @@ export class JsonDriver extends DeepBaseDriver {
     return this._queueOperation(async () => {
       const func = args.pop();
       const currentValue = this._getRecursive(this.obj, args.slice());
-      const newValue = func(currentValue);
+      const decodedValue = this._decodeFromMemory(currentValue, args);
+      const newValue = func(decodedValue);
       await this._setInternal(...args, newValue);
       return args;
     });
@@ -191,13 +213,14 @@ export class JsonDriver extends DeepBaseDriver {
   // Internal set without queuing (for use within queued operations)
   async _setInternal(...args) {
     if (args.length < 2) {
-      this.obj = args[0];
+      const value = this._encodeForMemory(args[0], []);
+      this.obj = value;
       await this._saveToFile();
       return [];
     }
     
     const keys = args.slice(0, -1);
-    const value = args[args.length - 1];
+    const value = this._encodeForMemory(args[args.length - 1], keys);
     
     this._setRecursive(this.obj, keys.slice(), value);
     await this._saveToFile();
@@ -208,12 +231,14 @@ export class JsonDriver extends DeepBaseDriver {
   _refreshFromDisk() {
     if (fs.existsSync(this.fileName)) {
       const fileContent = fs.readFileSync(this.fileName, "utf8");
-      this.obj = fileContent ? this.parse(fileContent) : {};
+      const parsed = fileContent ? this.parse(fileContent) : {};
+      this.obj = this._encodeForMemory(parsed, []);
     }
   }
 
   // Queue operations to prevent race conditions
   async _queueOperation(operation) {
+    this._assertUsable();
     const previousOperation = this._operationQueue;
     
     let resolver;
@@ -248,6 +273,62 @@ export class JsonDriver extends DeepBaseDriver {
       resolver();
     }
   }
+
+  async dispose({ clearMemory = true, releaseInstance = true } = {}) {
+    if (this._disposePromise) {
+      return this._disposePromise;
+    }
+
+    this._disposing = true;
+    this._disposePromise = (async () => {
+      try {
+        await this._operationQueue;
+        if (this._connected) {
+          await this._saveToFile();
+        }
+        this._connected = false;
+
+        if (clearMemory) {
+          this.obj = {};
+        }
+        if (releaseInstance && JsonDriver._instances[this.fileName] === this) {
+          delete JsonDriver._instances[this.fileName];
+        }
+
+        this._disposed = true;
+      } catch (error) {
+        this._disposing = false;
+        this._disposePromise = null;
+        throw error;
+      }
+    })();
+
+    return this._disposePromise;
+  }
+
+  _assertUsable() {
+    if (this._disposing || this._disposed) {
+      throw new Error('JsonDriver has been disposed');
+    }
+  }
+
+  _clone(value) {
+    return typeof value === 'object' && value !== null
+      ? this.parse(this.stringify(value))
+      : value;
+  }
+
+  _encodeForMemory(value, path) {
+    return this.encodeForMemory(this._clone(value), path.map(String));
+  }
+
+  _decodeFromMemory(value, path) {
+    return this.decodeFromMemory(this._clone(value), path.map(String));
+  }
+
+  _serializeMemory() {
+    return this.stringify(this._decodeFromMemory(this.obj, []));
+  }
   
   _setRecursive(obj, keys, value) {
     if (keys.length === 0) return;
@@ -278,7 +359,7 @@ export class JsonDriver extends DeepBaseDriver {
   }
   
   async _saveToFile() {
-    const serializedData = this.stringify(this.obj);
+    const serializedData = this._serializeMemory();
     if (this.multiProcess) {
       // Sync write ensures data is on disk before lock release
       fs.writeFileSync(this.fileName, serializedData);

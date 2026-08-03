@@ -123,6 +123,7 @@ All methods are async. Path arguments are variadic strings representing nested k
 |--------|-------------|
 | `connect()` | Connect all drivers. Returns `{ connected, total }`. |
 | `disconnect()` | Disconnect all drivers. |
+| `dispose(options)` | Wait for pending writes, disconnect, and optionally clear memory/release singleton instances. |
 
 ### Driver access
 
@@ -274,6 +275,33 @@ const db = new DeepBase(new JsonDriver({
   parse
 }));
 ```
+
+### Transform sensitive fields in the JSON memory cache
+
+`JsonDriver` accepts synchronous `encodeForMemory(value, path)` and
+`decodeFromMemory(value, path)` hooks. Recursively preserve object keys so
+non-sensitive paths remain queryable:
+
+```javascript
+const secrets = new Set(['privateKey', 'mnemonic']);
+const transform = (value, path, secretFn) => {
+  if (secrets.has(path.at(-1))) return secretFn(value);
+  if (Array.isArray(value)) return value.map((v, i) => transform(v, [...path, String(i)], secretFn));
+  if (value && typeof value === 'object') return Object.fromEntries(
+    Object.entries(value).map(([k, v]) => [k, transform(v, [...path, k], secretFn)])
+  );
+  return value;
+};
+
+const db = new DeepBase(new JsonDriver({
+  encodeForMemory: (value, path) => transform(value, path, seal),
+  decodeFromMemory: (value, path) => transform(value, path, unseal)
+}));
+
+await db.dispose({ clearMemory: true, releaseInstance: true });
+```
+
+Hooks receive defensive copies; throw on transform/authentication failure.
 
 ### Three-tier architecture
 

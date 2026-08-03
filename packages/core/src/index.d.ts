@@ -4,6 +4,11 @@ export interface DeepBaseDriverOptions {
     [key: string]: any;
 }
 
+export interface DisposeOptions {
+    clearMemory?: boolean;
+    releaseInstance?: boolean;
+}
+
 export class DeepBaseDriver {
     constructor(options?: DeepBaseDriverOptions);
 
@@ -15,8 +20,10 @@ export class DeepBaseDriver {
 
     connect(): Promise<void>;
     disconnect(): Promise<void>;
+    dispose(options?: DisposeOptions): Promise<void>;
 
     get(...args: any[]): Promise<any>;
+    getSync(...args: any[]): any;
     set(...args: any[]): Promise<any>;
     del(...args: any[]): Promise<any>;
     inc(...args: any[]): Promise<any>;
@@ -79,8 +86,10 @@ export class DeepBase {
 
     connect(): Promise<ConnectResult>;
     disconnect(): Promise<void>;
+    dispose(options?: DisposeOptions): Promise<void>;
 
     get(...args: any[]): Promise<any>;
+    getSync(...args: any[]): any;
     set(...args: any[]): Promise<any>;
     del(...args: any[]): Promise<any>;
     inc(...args: any[]): Promise<any>;

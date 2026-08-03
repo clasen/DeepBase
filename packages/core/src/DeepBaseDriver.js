@@ -17,6 +17,10 @@ export class DeepBaseDriver {
   async disconnect() {
     // Default implementation does nothing
   }
+
+  async dispose() {
+    await this.disconnect();
+  }
   
   async get(...args) {
     throw new Error('get() must be implemented by driver');

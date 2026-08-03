@@ -149,6 +149,12 @@ export class DeepBase {
     );
   }
 
+  async dispose(options = {}) {
+    await Promise.all(
+      this.drivers.map(driver => driver.dispose(options))
+    );
+  }
+
   async _readFromDrivers(method, args) {
     if (this.opts.readFirst) {
       // Try drivers in order until one succeeds

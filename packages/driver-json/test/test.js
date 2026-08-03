@@ -315,6 +315,215 @@ describe('JsonDriver', function() {
     });
   });
 
+  describe('Memory transforms', function() {
+    function transformSecrets(value, path, transform) {
+      if (path.at(-1) === 'privateKey' || path.at(-1) === 'mnemonic') {
+        return transform(value);
+      }
+      if (Array.isArray(value)) {
+        return value.map((item, index) =>
+          transformSecrets(item, [...path, String(index)], transform)
+        );
+      }
+      if (value !== null && typeof value === 'object') {
+        return Object.fromEntries(
+          Object.entries(value).map(([key, item]) => [
+            key,
+            transformSecrets(item, [...path, key], transform)
+          ])
+        );
+      }
+      return value;
+    }
+
+    function createMemoryTransforms() {
+      return {
+        encodeForMemory(value, path) {
+          return transformSecrets(value, path, secret => ({ sealed: secret }));
+        },
+        decodeFromMemory(value, path) {
+          return transformSecrets(value, path, sealed => {
+            if (!sealed || typeof sealed !== 'object' || !('sealed' in sealed)) {
+              throw new Error('Authentication failed');
+            }
+            return sealed.sealed;
+          });
+        }
+      };
+    }
+
+    it('encodes only secrets while preserving queryable structure', async function() {
+      const driver = new JsonDriver({
+        name: 'memory-transform',
+        path: testDataPath,
+        ...createMemoryTransforms()
+      });
+      const secureDb = new DeepBase(driver);
+      await secureDb.connect();
+
+      const account = {
+        address: '0x123',
+        privateKey: 'secret',
+        wallet: { mnemonic: 'words' }
+      };
+      await secureDb.set('account', account);
+      account.privateKey = 'caller-mutation';
+
+      assert.strictEqual(driver.obj.account.address, '0x123');
+      assert.deepStrictEqual(driver.obj.account.privateKey, { sealed: 'secret' });
+      assert.deepStrictEqual(driver.obj.account.wallet.mnemonic, { sealed: 'words' });
+      assert.strictEqual(await secureDb.get('account', 'address'), '0x123');
+
+      const decoded = await secureDb.get('account');
+      assert.deepStrictEqual(decoded, {
+        address: '0x123',
+        privateKey: 'secret',
+        wallet: { mnemonic: 'words' }
+      });
+      decoded.address = 'returned-mutation';
+      assert.strictEqual(driver.obj.account.address, '0x123');
+      await secureDb.dispose();
+    });
+
+    it('decodes values, entries and upd callbacks without exposing cache references', async function() {
+      const driver = new JsonDriver({
+        name: 'memory-collections',
+        path: testDataPath,
+        ...createMemoryTransforms()
+      });
+      const secureDb = new DeepBase(driver);
+      await secureDb.connect();
+      await secureDb.set('accounts', 'main', {
+        address: '0x123',
+        privateKey: 'old-secret'
+      });
+
+      assert.deepStrictEqual(await secureDb.values('accounts'), [{
+        address: '0x123',
+        privateKey: 'old-secret'
+      }]);
+      assert.deepStrictEqual(await secureDb.entries('accounts'), [[
+        'main',
+        { address: '0x123', privateKey: 'old-secret' }
+      ]]);
+
+      const addedPath = await driver.add('accounts', {
+        address: '0x456',
+        privateKey: 'added-secret'
+      });
+      assert.deepStrictEqual(
+        driver.obj.accounts[addedPath.at(-1)].privateKey,
+        { sealed: 'added-secret' }
+      );
+
+      await secureDb.upd('accounts', 'main', account => {
+        assert.strictEqual(account.privateKey, 'old-secret');
+        account.privateKey = 'new-secret';
+        return account;
+      });
+      assert.deepStrictEqual(driver.obj.accounts.main.privateKey, { sealed: 'new-secret' });
+      await secureDb.dispose();
+    });
+
+    it('keeps the existing decoded disk format and encodes parsed data on load', async function() {
+      const options = {
+        name: 'memory-persistence',
+        path: testDataPath,
+        ...createMemoryTransforms()
+      };
+      const firstDriver = new JsonDriver(options);
+      const firstDb = new DeepBase(firstDriver);
+      await firstDb.connect();
+      await firstDb.set('account', { address: '0x123', privateKey: 'secret' });
+      await firstDb.dispose();
+
+      const filePath = path.join(testDataPath, 'memory-persistence.json');
+      assert.deepStrictEqual(JSON.parse(fs.readFileSync(filePath, 'utf8')), {
+        account: { address: '0x123', privateKey: 'secret' }
+      });
+
+      const secondDriver = new JsonDriver(options);
+      const secondDb = new DeepBase(secondDriver);
+      await secondDb.connect();
+      assert.deepStrictEqual(secondDriver.obj.account.privateKey, { sealed: 'secret' });
+      assert.strictEqual(await secondDb.get('account', 'privateKey'), 'secret');
+      await secondDb.dispose();
+    });
+
+    it('does not modify cache when encoding fails', async function() {
+      const driver = new JsonDriver({
+        name: 'memory-encode-failure',
+        path: testDataPath,
+        encodeForMemory(value, path) {
+          if (path.at(-1) === 'privateKey') {
+            throw new Error('Encoding failed');
+          }
+          return value;
+        }
+      });
+      const secureDb = new DeepBase(driver);
+      await secureDb.connect();
+      await secureDb.set('account', 'address', '0x123');
+
+      await assert.rejects(
+        secureDb.set('account', 'privateKey', 'secret'),
+        /Encoding failed/
+      );
+      assert.deepStrictEqual(driver.obj, { account: { address: '0x123' } });
+      await secureDb.dispose();
+    });
+
+    it('throws authentication errors instead of returning cached ciphertext', async function() {
+      const driver = new JsonDriver({
+        name: 'memory-auth-failure',
+        path: testDataPath,
+        ...createMemoryTransforms()
+      });
+      const secureDb = new DeepBase(driver);
+      await secureDb.connect();
+      await secureDb.set('account', 'privateKey', 'secret');
+      driver.obj.account.privateKey = { invalid: 'ciphertext' };
+
+      await assert.rejects(
+        secureDb.get('account', 'privateKey'),
+        /Authentication failed/
+      );
+      driver.obj.account.privateKey = { sealed: 'secret' };
+      await secureDb.dispose();
+    });
+  });
+
+  describe('Dispose', function() {
+    it('waits for pending writes, clears memory and releases the singleton', async function() {
+      const driver = db.getDriver(0);
+      let releaseWrite;
+      let writeStarted;
+      const writeGate = new Promise(resolve => { releaseWrite = resolve; });
+      const started = new Promise(resolve => { writeStarted = resolve; });
+      const saveToFile = driver._saveToFile.bind(driver);
+      driver._saveToFile = async () => {
+        writeStarted();
+        await writeGate;
+        return saveToFile();
+      };
+
+      const pendingWrite = db.set('account', 'address', '0x123');
+      await started;
+      const disposal = db.dispose({ clearMemory: true, releaseInstance: true });
+
+      assert.strictEqual(JsonDriver._instances[driver.fileName], driver);
+      releaseWrite();
+      await Promise.all([pendingWrite, disposal]);
+
+      assert.deepStrictEqual(driver.obj, {});
+      assert.strictEqual(JsonDriver._instances[driver.fileName], undefined);
+      assert.notStrictEqual(
+        new JsonDriver({ name: driver.name, path: driver.path }),
+        driver
+      );
+    });
+  });
+
   describe('Queue / Stack (add + pop + shift)', function() {
     it('should work as FIFO queue with add + shift', async function() {
       // Enqueue items

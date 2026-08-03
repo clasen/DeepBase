@@ -225,6 +225,7 @@ new DeepBase(drivers, options)
 
 - `await db.connect()` - Connect all drivers
 - `await db.disconnect()` - Disconnect all drivers
+- `await db.dispose({ clearMemory, releaseInstance })` - Wait for pending writes, disconnect, clear memory, and release singleton instances
 - `await db.get(...path)` - Get value at path
 - `await db.set(...path, value)` - Set value at path
 - `await db.del(...path)` - Delete value at path
@@ -469,6 +470,34 @@ await db.connect();
 await db.set("a", "b", { circular: {} });
 await db.set("a", "b", "circular", "self", await db.get("a", "b"));
 ```
+
+## 🔐 Protecting Sensitive Fields in Memory
+
+The JSON driver can transform defensive copies exactly when values enter or
+leave its internal cache. Keep the object structure intact so normal paths
+remain queryable:
+
+```javascript
+const secrets = new Set(['privateKey', 'mnemonic']);
+const transform = (value, path, secretFn) => {
+  if (secrets.has(path.at(-1))) return secretFn(value);
+  if (Array.isArray(value)) return value.map((v, i) => transform(v, [...path, String(i)], secretFn));
+  if (value && typeof value === 'object') return Object.fromEntries(
+    Object.entries(value).map(([k, v]) => [k, transform(v, [...path, k], secretFn)])
+  );
+  return value;
+};
+
+const db = new DeepBase(new JsonDriver({
+  encodeForMemory: (value, path) => transform(value, path, seal),
+  decodeFromMemory: (value, path) => transform(value, path, unseal)
+}));
+
+await db.dispose({ clearMemory: true, releaseInstance: true });
+```
+
+Throw from either hook on encryption/authentication failure; DeepBase does not
+fall back to the untransformed cached value.
 
 ## 🔒 Secure Storage with Encryption
 
