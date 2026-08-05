@@ -554,7 +554,7 @@ for (const pragma of PRAGMA_MODES) {
       });
     });
 
-    describe('Keys with Underscores (SQL LIKE safety)', function () {
+    describe('Special Key Isolation', function () {
       it('should not cross-match keys with underscores', async function () {
         await db.set('chat_1', 'msg', 'hello');
         await db.set('chatX1', 'msg', 'world');
@@ -584,6 +584,19 @@ for (const pragma of PRAGMA_MODES) {
         await db.set('progress', 'abc', 'done', false);
         assert.deepStrictEqual(await db.get('progress', '100%'), { done: true });
         assert.deepStrictEqual(await db.get('progress', 'abc'), { done: false });
+      });
+
+      it('should isolate range boundaries for slashes and backslashes', async function () {
+        await db.set('route/path', 'child', 1);
+        await db.set('route/path0', 'child', 2);
+        await db.set('route\\path', 'child', 3);
+
+        await db.set('route/path', { replaced: true });
+        await db.del('route\\path');
+
+        assert.deepStrictEqual(await db.get('route/path'), { replaced: true });
+        assert.deepStrictEqual(await db.get('route/path0'), { child: 2 });
+        assert.strictEqual(await db.get('route\\path'), null);
       });
     });
 

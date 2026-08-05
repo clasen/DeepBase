@@ -92,6 +92,23 @@ describe('SqliteDriver multi-process safety', function () {
     await driver.disconnect();
   });
 
+  it('uses the primary-key index to find descendant rows', async function () {
+    const driver = new SqliteDriver({
+      name: 'descendant-query-plan',
+      path: testDataPath,
+    });
+    await driver.connect();
+
+    const plan = driver.db
+      .prepare(`EXPLAIN QUERY PLAN ${driver.delChildrenStmt.source}`)
+      .all('parent.', 'parent/');
+    const details = plan.map(step => step.detail).join('\n');
+
+    assert.match(details, /SEARCH deepbase USING PRIMARY KEY/);
+    assert.doesNotMatch(details, /SCAN deepbase/);
+    await driver.disconnect();
+  });
+
   it('adds a missing seq column without rewriting legacy rows', async function () {
     const name = 'legacy-no-seq';
     const fileName = path.join(testDataPath, `${name}.db`);

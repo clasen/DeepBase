@@ -72,17 +72,19 @@ export class SqliteDriver extends DeepBaseDriver {
     `);
     this.delStmt = this.db.prepare('DELETE FROM deepbase WHERE key = ?');
     this.getAllStmt = this.db.prepare('SELECT key, value FROM deepbase ORDER BY seq, key');
-    this.getKeysLikeStmt = this.db.prepare(
-      "SELECT key, value FROM deepbase WHERE key LIKE ? ESCAPE '!' ORDER BY seq, key",
+    this.getChildrenStmt = this.db.prepare(
+      'SELECT key, value FROM deepbase WHERE key >= ? AND key < ? ORDER BY seq, key',
     );
     this.getFirstChildKeyStmt = this.db.prepare(
-      "SELECT key FROM deepbase WHERE key LIKE ? ESCAPE '!' ORDER BY seq, key LIMIT 1",
+      'SELECT key FROM deepbase WHERE key >= ? AND key < ? ORDER BY seq, key LIMIT 1',
     );
     this.getLastChildKeyStmt = this.db.prepare(
-      "SELECT key FROM deepbase WHERE key LIKE ? ESCAPE '!' ORDER BY seq DESC, key DESC LIMIT 1",
+      'SELECT key FROM deepbase WHERE key >= ? AND key < ? ORDER BY seq DESC, key DESC LIMIT 1',
     );
-    this.delChildrenStmt = this.db.prepare("DELETE FROM deepbase WHERE key LIKE ? ESCAPE '!'");
-    this.hasChildrenStmt = this.db.prepare("SELECT 1 FROM deepbase WHERE key LIKE ? ESCAPE '!' LIMIT 1");
+    this.getFirstKeyStmt = this.db.prepare('SELECT key FROM deepbase ORDER BY seq, key LIMIT 1');
+    this.getLastKeyStmt = this.db.prepare('SELECT key FROM deepbase ORDER BY seq DESC, key DESC LIMIT 1');
+    this.delChildrenStmt = this.db.prepare('DELETE FROM deepbase WHERE key >= ? AND key < ?');
+    this.hasChildrenStmt = this.db.prepare('SELECT 1 FROM deepbase WHERE key >= ? AND key < ? LIMIT 1');
 
     const setTxn = this.db.transaction((key, jsonValue, keys) => {
       this._expandParentObjects(keys);
@@ -90,10 +92,10 @@ export class SqliteDriver extends DeepBaseDriver {
     });
     this._setTxn = (...args) => setTxn.immediate(...args);
 
-    const delTxn = this.db.transaction((key, likePattern, keys) => {
+    const delTxn = this.db.transaction((key, childLowerBound, childUpperBound, keys) => {
       this._expandParentObjects(keys);
       this.delStmt.run(key);
-      this.delChildrenStmt.run(likePattern);
+      this.delChildrenStmt.run(childLowerBound, childUpperBound);
     });
     this._delTxn = (...args) => delTxn.immediate(...args);
 
@@ -209,17 +211,17 @@ export class SqliteDriver extends DeepBaseDriver {
 
     const key = this._pathToKey(args);
     const row = this.getStmt.get(key);
-    const likePattern = this._likePrefix(key);
+    const childRange = this._childRange(key);
 
     if (row) {
-      if (this.hasChildrenStmt.get(likePattern)) {
-        return this._buildObjectFromChildren(key, likePattern);
+      if (this.hasChildrenStmt.get(...childRange)) {
+        return this._buildObjectFromChildren(key, childRange);
       }
       return JSON.parse(row.value);
     }
 
-    if (this.hasChildrenStmt.get(likePattern)) {
-      return this._buildObjectFromChildren(key, likePattern);
+    if (this.hasChildrenStmt.get(...childRange)) {
+      return this._buildObjectFromChildren(key, childRange);
     }
 
     return this._getFromParent(args);
@@ -249,7 +251,7 @@ export class SqliteDriver extends DeepBaseDriver {
   }
 
   _replaceRow(key, jsonValue) {
-    this.delChildrenStmt.run(this._likePrefix(key));
+    this.delChildrenStmt.run(...this._childRange(key));
     this.setStmt.run(key, jsonValue);
   }
 
@@ -261,9 +263,9 @@ export class SqliteDriver extends DeepBaseDriver {
     }
 
     const key = this._pathToKey(keys);
-    const likePattern = this._likePrefix(key);
+    const childRange = this._childRange(key);
     return this._runWrite(() => {
-      this._delTxn(key, likePattern, keys);
+      this._delTxn(key, ...childRange, keys);
     });
   }
 
@@ -322,8 +324,10 @@ export class SqliteDriver extends DeepBaseDriver {
   }
 
   _findBoundaryNestedKey(path, fromEnd) {
-    const likePattern = path.length === 0 ? '%' : this._likePrefix(this._pathToKey(path));
-    const row = (fromEnd ? this.getLastChildKeyStmt : this.getFirstChildKeyStmt).get(likePattern);
+    const row = path.length === 0
+      ? (fromEnd ? this.getLastKeyStmt : this.getFirstKeyStmt).get()
+      : (fromEnd ? this.getLastChildKeyStmt : this.getFirstChildKeyStmt)
+        .get(...this._childRange(this._pathToKey(path)));
     if (!row) return undefined;
 
     const fullPath = this._keyToPath(row.key);
@@ -343,8 +347,8 @@ export class SqliteDriver extends DeepBaseDriver {
     return result;
   }
 
-  _buildObjectFromChildren(parentKey, likePattern) {
-    const rows = this.getKeysLikeStmt.all(likePattern || (parentKey ? this._likePrefix(parentKey) : '%'));
+  _buildObjectFromChildren(parentKey, childRange) {
+    const rows = this.getChildrenStmt.all(...childRange);
     const result = {};
     const parentPathLen = parentKey ? this._keyToPath(parentKey).length : 0;
 
@@ -368,12 +372,11 @@ export class SqliteDriver extends DeepBaseDriver {
     );
   }
 
-  _escapeLikePattern(str) {
-    return str.replace(/[!%_]/g, '!$&');
-  }
-
-  _likePrefix(key) {
-    return this._escapeLikePattern(key) + '.%';
+  _childRange(key) {
+    // Stored descendants start with `${key}.`. Since '/' is the next ASCII
+    // character after '.', this half-open range matches exactly that prefix
+    // while allowing SQLite to seek through the primary-key index.
+    return [`${key}.`, `${key}/`];
   }
 
   _setNestedValue(obj, path, value) {
