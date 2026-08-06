@@ -51,9 +51,10 @@ The monorepo tests use [`test/sqlite-fixture.js`](test/sqlite-fixture.js) (`crea
 
 ## Semantics
 
-- Same nested-key behavior as `deepbase-sqlite` (dot paths, `LIKE` escape, `seq` for stable `Object.keys` / `shift` / `pop`).
+- Same nested-key behavior as `deepbase-sqlite` (dot paths, indexed descendant ranges on SQLite-family dialects, `seq` for stable `Object.keys` / `shift` / `pop`).
 - `first()` / `last()` are implemented with ordered boundary queries and keep the same key order contract as `keys()`.
 - Upserts: new rows get `seq = MAX(seq)+1`; updates to an existing `key` only change `value` (`seq` unchanged).
+- Automatic schema setup creates an index on `seq` so sequence allocation and ordered reads do not scan the full table.
 
 ## Benchmarks
 

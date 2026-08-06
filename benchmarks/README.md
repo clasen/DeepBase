@@ -78,13 +78,19 @@ The script also writes a JSON artifact to `benchmarks/results/` so runs can be c
 
 ### Driver Comparison (500 iterations)
 
-| Operation | JSON | MongoDB | Redis | Winner |
-|-----------|------|---------|-------|--------|
-| **Write** | ~2,000 ops/sec | ~2,300 ops/sec | **~6,000 ops/sec** | ⚡ Redis |
-| **Read** | **~594,000 ops/sec** | ~1,600 ops/sec | ~6,800 ops/sec | 📁 JSON |
-| **Increment** | ~2,300 ops/sec | ~2,700 ops/sec | **~6,900 ops/sec** | ⚡ Redis |
-| **Update** | ~2,500 ops/sec | ~900 ops/sec | **~3,500 ops/sec** | ⚡ Redis |
-| **Delete** | ~2,700 ops/sec | ~2,900 ops/sec | **~7,700 ops/sec** | ⚡ Redis |
+| Operation | JSON | SQLite | Drizzle | MongoDB | Redis | RedisJSON |
+|-----------|------|--------|---------|---------|-------|-----------|
+| **Write** | ~2.7k | ~46.4k | ~13.5k | ~3.8k | ~2.8k | ~5.1k |
+| **Read** | ~719.1k | ~245.4k | ~27.5k | ~1.8k | ~4.3k | ~11.1k |
+| **Increment** | ~2.0k | ~73.5k | ~10.7k | ~4.9k | ~3.0k | ~11.3k |
+| **Update** | ~2.0k | ~69.8k | ~10.2k | ~1.2k | ~1.5k | ~3.8k |
+| **Delete** | ~2.1k | ~76.4k | ~17.3k | ~5.3k | ~1.8k | ~10.9k |
+| **Stack** | ~2.1k | ~40.9k | ~9.7k | ~2.3k | ~3.0k | ~3.9k |
+| **Queue** | ~2.1k | ~44.5k | ~9.8k | ~2.6k | ~2.5k | ~3.9k |
+
+_Results in operations per second._
+
+_Drizzle results refreshed on 2026-08-05 after the indexed descendant-range and `seq` index optimization. Values are medians from five local `balanced` runs with 500 iterations per operation and 200 push/pop operations for stack and queue._
 
 ### Key Findings
 
@@ -143,6 +149,24 @@ Memory Usage: Shows RSS and Heap usage after each operation
 - Single file per database instance
 - Perfect for < 10,000 records
 - Low memory footprint
+
+### Drizzle ORM + SQLite (500 iterations)
+
+```
+Write:        13,468 ops/sec
+Read:         27,518 ops/sec
+Update:       10,196 ops/sec
+Increment:    10,742 ops/sec
+Delete:       17,346 ops/sec
+Stack:         9,657 ops/sec
+Queue:         9,839 ops/sec
+```
+
+**Characteristics:**
+- Uses the SQLite primary-key index for descendant ranges
+- Uses a covering `seq` index for sequence allocation and ordered reads
+- Results are medians from five runs with `pragma=balanced`
+- Keeps escaped `LIKE` matching on dialects without a verified binary key collation
 
 ### MongoDB Driver (1000 iterations)
 
@@ -368,4 +392,3 @@ To add new benchmarks:
 - [Testing Guide](../TESTING.md) - Unit tests
 - [Main README](../README.md) - Documentation
 - [Examples](../examples/) - Usage examples
-

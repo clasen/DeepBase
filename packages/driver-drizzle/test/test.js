@@ -525,7 +525,7 @@ for (const pragma of PRAGMA_MODES) {
       });
     });
 
-    describe('Keys with Underscores (SQL LIKE safety)', function () {
+    describe('Special Key Isolation', function () {
       it('should not cross-match keys with underscores', async function () {
         await db.set('chat_1', 'msg', 'hello');
         await db.set('chatX1', 'msg', 'world');
@@ -555,6 +555,61 @@ for (const pragma of PRAGMA_MODES) {
         await db.set('progress', 'abc', 'done', false);
         assert.deepStrictEqual(await db.get('progress', '100%'), { done: true });
         assert.deepStrictEqual(await db.get('progress', 'abc'), { done: false });
+      });
+
+      it('should isolate range boundaries for slashes and backslashes', async function () {
+        await db.set('route/path', 'child', 1);
+        await db.set('route/path0', 'child', 2);
+        await db.set('route\\path', 'child', 3);
+
+        await db.set('route/path', { replaced: true });
+        await db.del('route\\path');
+
+        assert.deepStrictEqual(await db.get('route/path'), { replaced: true });
+        assert.deepStrictEqual(await db.get('route/path0'), { child: 2 });
+        assert.strictEqual(await db.get('route\\path'), null);
+      });
+    });
+
+    describe('Indexed Query Plans', function () {
+      it('uses indexes for descendant deletion and sequence allocation', function () {
+        const driver = db.getDriver(0);
+        const deleteQuery = driver.drizzle
+          .delete(driver.table)
+          .where(driver._childCondition(driver._childRange('parent')))
+          .toSQL();
+        const deletePlan = driver.client
+          .prepare(`EXPLAIN QUERY PLAN ${deleteQuery.sql}`)
+          .all(...deleteQuery.params)
+          .map(step => step.detail)
+          .join('\n');
+        const sequencePlan = driver.client
+          .prepare('EXPLAIN QUERY PLAN SELECT COALESCE(MAX(seq), 0) + 1 FROM deepbase_main')
+          .all()
+          .map(step => step.detail)
+          .join('\n');
+
+        assert.match(deletePlan, /SEARCH deepbase_main USING INDEX .*\(key>\? AND key<\?\)/);
+        assert.doesNotMatch(deletePlan, /SCAN deepbase_main/);
+        assert.match(sequencePlan, /USING COVERING INDEX deepbase_main_seq_idx/);
+      });
+
+      it('retains escaped LIKE for dialects without verified binary collation', function () {
+        const driver = db.getDriver(0);
+        const originalDialectName = driver._dialectName;
+
+        try {
+          driver._dialectName = () => 'PgDialect';
+          const query = driver.drizzle
+            .delete(driver.table)
+            .where(driver._childCondition(driver._childRange('parent_100%')))
+            .toSQL();
+
+          assert.match(query.sql, /like \? ESCAPE '!'/i);
+          assert.deepStrictEqual(query.params, ['parent!_100!%.%']);
+        } finally {
+          driver._dialectName = originalDialectName;
+        }
       });
     });
 

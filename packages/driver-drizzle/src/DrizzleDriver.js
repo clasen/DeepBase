@@ -1,5 +1,5 @@
 import { DeepBaseDriver } from 'deepbase';
-import { asc, desc, eq, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, lt, sql } from 'drizzle-orm';
 import { integer as pgInteger, pgTable, text as pgText } from 'drizzle-orm/pg-core';
 import { int as mysqlInt, mysqlTable, text as mysqlText, varchar as mysqlVarchar } from 'drizzle-orm/mysql-core';
 import { integer as sqliteInteger, sqliteTable, text as sqliteText } from 'drizzle-orm/sqlite-core';
@@ -102,11 +102,11 @@ export class DrizzleDriver extends DeepBaseDriver {
     });
   }
 
-  _delTxn(key, likePattern, keys) {
+  _delTxn(key, childRange, keys) {
     this.drizzle.transaction((tx) => {
       this._expandParentObjects(tx, keys);
       this._delRow(tx, key);
-      this._deleteLike(tx, likePattern);
+      this._deleteChildren(tx, childRange);
     });
   }
 
@@ -164,6 +164,23 @@ export class DrizzleDriver extends DeepBaseDriver {
     return `ALTER TABLE ${tableName} ADD COLUMN ${seqCol} INTEGER NOT NULL DEFAULT 0`;
   }
 
+  _buildCreateSeqIndexSql() {
+    const dialect = this._dialectName();
+    const rawIndexName = `${this._getTableName()}_${this.table.seq?.name ?? 'seq'}_idx`;
+    const indexName = this._quoteIdent(rawIndexName, dialect);
+    const tableName = this._quoteIdent(this._getTableName(), dialect);
+    const seqCol = this._quoteIdent(this.table.seq?.name ?? 'seq', dialect);
+
+    if (/mysql|singlestore/i.test(dialect)) {
+      return `CREATE INDEX ${indexName} ON ${tableName} (${seqCol})`;
+    }
+    if (/mssql/i.test(dialect)) {
+      const escapedIndexName = rawIndexName.replace(/'/g, "''");
+      return `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'${escapedIndexName}') CREATE INDEX ${indexName} ON ${tableName} (${seqCol})`;
+    }
+    return `CREATE INDEX IF NOT EXISTS ${indexName} ON ${tableName} (${seqCol})`;
+  }
+
   _isDuplicateColumnError(error) {
     const msg = String(error?.message ?? '').toLowerCase();
     const causeMsg = String(error?.cause?.message ?? '').toLowerCase();
@@ -172,6 +189,19 @@ export class DrizzleDriver extends DeepBaseDriver {
       full.includes('duplicate column') ||
       full.includes('already exists') ||
       full.includes('column exists')
+    );
+  }
+
+  _isDuplicateIndexError(error) {
+    const msg = String(error?.message ?? '').toLowerCase();
+    const causeMsg = String(error?.cause?.message ?? '').toLowerCase();
+    const full = `${msg} ${causeMsg}`;
+    return (
+      error?.code === 'ER_DUP_KEYNAME' ||
+      error?.errno === 1061 ||
+      error?.code === '42P07' ||
+      full.includes('duplicate key name') ||
+      full.includes('already exists')
     );
   }
 
@@ -218,6 +248,13 @@ export class DrizzleDriver extends DeepBaseDriver {
         throw error;
       }
     }
+    try {
+      await Promise.resolve(this._executeRaw(this._buildCreateSeqIndexSql()));
+    } catch (error) {
+      if (!this._isDuplicateIndexError(error)) {
+        throw error;
+      }
+    }
     this._schemaEnsured = true;
   }
 
@@ -229,6 +266,13 @@ export class DrizzleDriver extends DeepBaseDriver {
       this._executeRaw(this._buildAlterSeqSql());
     } catch (error) {
       if (!this._isDuplicateColumnError(error)) {
+        throw error;
+      }
+    }
+    try {
+      this._executeRaw(this._buildCreateSeqIndexSql());
+    } catch (error) {
+      if (!this._isDuplicateIndexError(error)) {
         throw error;
       }
     }
@@ -275,37 +319,37 @@ export class DrizzleDriver extends DeepBaseDriver {
   }
 
   /** @param {any} d */
-  _hasChildren(d, likePattern) {
+  _hasChildren(d, childRange) {
     const t = this.table;
     const row = d
       .select({ k: t.key })
       .from(t)
-      .where(sql`${t.key} LIKE ${likePattern} ESCAPE '!'`)
+      .where(this._childCondition(childRange))
       .limit(1)
       .get();
     return !!row;
   }
 
   /** @param {any} d */
-  _selectKeysLike(d, likePattern) {
+  _selectChildren(d, childRange) {
     const t = this.table;
     return d
       .select()
       .from(t)
-      .where(sql`${t.key} LIKE ${likePattern} ESCAPE '!'`)
+      .where(this._childCondition(childRange))
       .orderBy(asc(t.seq), asc(t.key))
       .all();
   }
 
   /** @param {any} d */
-  _deleteLike(d, likePattern) {
+  _deleteChildren(d, childRange) {
     const t = this.table;
-    d.delete(t).where(sql`${t.key} LIKE ${likePattern} ESCAPE '!'`).run();
+    d.delete(t).where(this._childCondition(childRange)).run();
   }
 
   /** @param {any} d */
   _replaceRow(d, key, jsonValue) {
-    this._deleteLike(d, this._likePrefix(key));
+    this._deleteChildren(d, this._childRange(key));
     this._setRow(d, key, jsonValue);
   }
 
@@ -357,17 +401,17 @@ export class DrizzleDriver extends DeepBaseDriver {
 
     const key = this._pathToKey(args);
     const row = this._getRow(d, key);
-    const likePattern = this._likePrefix(key);
+    const childRange = this._childRange(key);
 
     if (row) {
-      if (this._hasChildren(d, likePattern)) {
-        return this._buildObjectFromChildren(d, key, likePattern);
+      if (this._hasChildren(d, childRange)) {
+        return this._buildObjectFromChildren(d, key, childRange);
       }
       return JSON.parse(row.value);
     }
 
-    if (this._hasChildren(d, likePattern)) {
-      return this._buildObjectFromChildren(d, key, likePattern);
+    if (this._hasChildren(d, childRange)) {
+      return this._buildObjectFromChildren(d, key, childRange);
     }
 
     return this._getFromParent(d, args);
@@ -403,7 +447,7 @@ export class DrizzleDriver extends DeepBaseDriver {
     }
 
     const key = this._pathToKey(keys);
-    this._delTxn(key, this._likePrefix(key), keys);
+    this._delTxn(key, this._childRange(key), keys);
   }
 
   async inc(...args) {
@@ -459,12 +503,14 @@ export class DrizzleDriver extends DeepBaseDriver {
   }
 
   _findBoundaryNestedKey(d, path, fromEnd) {
-    const likePattern = path.length === 0 ? '%' : this._likePrefix(this._pathToKey(path));
     const t = this.table;
-    const row = d
+    let query = d
       .select({ key: t.key })
-      .from(t)
-      .where(sql`${t.key} LIKE ${likePattern} ESCAPE '!'`)
+      .from(t);
+    if (path.length > 0) {
+      query = query.where(this._childCondition(this._childRange(this._pathToKey(path))));
+    }
+    const row = query
       .orderBy(fromEnd ? desc(t.seq) : asc(t.seq), fromEnd ? desc(t.key) : asc(t.key))
       .limit(1)
       .get();
@@ -502,8 +548,8 @@ export class DrizzleDriver extends DeepBaseDriver {
   }
 
   /** @param {any} d */
-  _buildObjectFromChildren(d, parentKey, likePattern) {
-    const rows = this._selectKeysLike(d, likePattern || (parentKey ? this._likePrefix(parentKey) : '%'));
+  _buildObjectFromChildren(d, parentKey, childRange) {
+    const rows = this._selectChildren(d, childRange);
     const result = {};
     const parentPathLen = parentKey ? this._keyToPath(parentKey).length : 0;
 
@@ -517,12 +563,26 @@ export class DrizzleDriver extends DeepBaseDriver {
     return result;
   }
 
-  _escapeLikePattern(str) {
-    return str.replace(/[!%_]/g, '!$&');
+  _childCondition([lowerBound, upperBound]) {
+    if (/sqlite|libsql|turso/i.test(this._dialectName())) {
+      return and(gte(this.table.key, lowerBound), lt(this.table.key, upperBound));
+    }
+
+    const key = lowerBound.slice(0, -1);
+    const likePattern = `${this._escapeLikePattern(key)}.%`;
+    return sql`${this.table.key} LIKE ${likePattern} ESCAPE '!'`;
   }
 
-  _likePrefix(key) {
-    return this._escapeLikePattern(key) + '.%';
+  _childRange(key) {
+    // Stored descendants start with `${key}.`. Since '/' is the next ASCII
+    // character after '.', this half-open range is indexable and exact for
+    // SQLite's binary key collation. Other dialects retain escaped LIKE until
+    // their configured key collation can be verified safely.
+    return [`${key}.`, `${key}/`];
+  }
+
+  _escapeLikePattern(str) {
+    return str.replace(/[!%_]/g, '!$&');
   }
 
   _setNestedValue(obj, path, value) {
