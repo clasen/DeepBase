@@ -1,6 +1,6 @@
 # DeepBase v3.8.4 Benchmark Results
 
-Measured on 2026-08-05. This report separates results verified in the current checkout from older comparison values that could not be refreshed without external services.
+Measured on 2026-08-05 and 2026-08-06. This report separates results verified in the current checkout from older comparison values that could not be refreshed without external services.
 
 ## Executive Summary
 
@@ -8,6 +8,7 @@ Measured on 2026-08-05. This report separates results verified in the current ch
 - `deepbase-drizzle` uses the same range strategy for SQLite, LibSQL, and Turso, and creates a non-unique `seq` index during automatic schema setup.
 - Drizzle SQLite sequential `set` throughput on a 5,000-write workload improved from approximately 4,867 ops/sec to a five-run median of 14,634 ops/sec (about 3x).
 - The current Drizzle query plan uses the primary-key index for descendant operations and a covering `seq` index for `MAX(seq)`.
+- On the standard 1,000-operation benchmark, three-run medians were approximately 597,000 cached reads/sec for JSON, 236,000 reads/sec for native SQLite, and 23,700 reads/sec for Drizzle with SQLite.
 
 ## Environment
 
@@ -21,6 +22,30 @@ Measured on 2026-08-05. This report separates results verified in the current ch
 | SQLite profile | `balanced` (WAL, `synchronous=NORMAL`) |
 
 Results are local measurements and will vary with hardware, filesystem, database size, warm-up state, and background load.
+
+## Local Standard Benchmark: Three-Run Median
+
+Measured on 2026-08-06 with 1,000 sequential writes and reads, plus 100 updates,
+increments, and deletes per run. JSON writes include full-file persistence;
+JSON reads use the driver's in-memory cache. Both SQLite variants use the
+`balanced` pragma profile.
+
+| Driver | Write ops/sec | Read ops/sec | Update ops/sec | Increment ops/sec | Delete ops/sec |
+|---|---:|---:|---:|---:|---:|
+| JSON | 1,500 | 597,491 | 907 | 880 | 910 |
+| SQLite | 49,124 | 236,011 | 63,860 | 87,454 | 74,260 |
+| Drizzle + SQLite | 10,835 | 23,716 | 8,701 | 9,459 | 15,379 |
+
+Commands, each executed three times:
+
+```bash
+npm run bench:json
+npm run bench:sqlite
+npm run bench:drizzle
+```
+
+MongoDB and Redis were unavailable on `127.0.0.1` during this measurement, so
+no fresh external-service numbers are claimed in the README.
 
 ## Cross-Driver Snapshot
 

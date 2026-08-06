@@ -583,13 +583,17 @@ MIT License - Copyright (c) Martin Clasen
 
 ## 📊 Performance
 
-DeepBase v3.0 delivers exceptional performance:
+DeepBase v3.8.4 local benchmark medians (three runs on 2026-08-06,
+1,000 sequential writes and reads per run):
 
-- ⚡ **Redis**: 6,000-7,700 ops/sec for most operations
-- 📁 **JSON**: 600,000+ ops/sec for cached reads
-- 🍃 **MongoDB**: 1,600-2,900 ops/sec balanced performance
+- 📁 **JSON**: ~597,000 cached reads/sec and ~1,500 persisted writes/sec
+- 🗃️ **SQLite** (`balanced`): ~236,000 reads/sec and ~49,100 writes/sec
+- 🏗️ **Drizzle + SQLite** (`balanced`): ~23,700 reads/sec and ~10,800 writes/sec
 
-See [Benchmark Results](./BENCHMARK_RESULTS.md) for detailed performance analysis.
+MongoDB and Redis were not available in this measurement environment, so their
+older results are not presented as current. See the
+[Benchmark Results](https://github.com/clasen/DeepBase/blob/main/BENCHMARK_RESULTS.md)
+for the full methodology, detailed operations, environment, and reproduction
+commands. Results vary by hardware, dataset, durability settings, and workload.
 
 For more information, visit [GitHub](https://github.com/clasen/DeepBase)
-

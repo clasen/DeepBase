@@ -474,8 +474,10 @@ await db.set("a", "b", "circular", "self", await db.get("a", "b"));
 ## 🔐 Protecting Sensitive Fields in Memory
 
 The JSON driver can transform defensive copies exactly when values enter or
-leave its internal cache. Keep the object structure intact so normal paths
-remain queryable:
+leave its internal cache. This reduces the time sensitive values remain as
+plaintext in the driver's long-lived cache while keeping non-sensitive paths
+queryable. The complete encrypted database example below shows these hooks
+with real authenticated encryption:
 
 ```javascript
 const secrets = new Set(['privateKey', 'mnemonic']);
@@ -497,52 +499,125 @@ await db.dispose({ clearMemory: true, releaseInstance: true });
 ```
 
 Throw from either hook on encryption/authentication failure; DeepBase does not
-fall back to the untransformed cached value.
+fall back to the untransformed cached value. These hooks protect the internal
+cache, not every temporary plaintext value in the JavaScript process.
 
 ## 🔒 Secure Storage with Encryption
 
-You can create encrypted storage by extending DeepBase with custom serialization:
+Use Node.js authenticated encryption to protect the complete database on disk,
+and the memory hooks to keep selected fields encrypted in the JSON driver's
+internal cache:
 
 ```javascript
-import CryptoJS from 'crypto-js';
-import DeepBase, { JsonDriver } from 'deepbase';
+import crypto from 'node:crypto';
+import DeepBase from 'deepbase';
+import { JsonDriver } from 'deepbase-json';
 
-class DeepbaseSecure extends DeepBase {
-  constructor(opts) {
-    const encryptionKey = opts.encryptionKey;
-    delete opts.encryptionKey;
+const encryptionKey = Buffer.from(
+  process.env.DEEPBASE_ENCRYPTION_KEY ?? '',
+  'base64'
+);
 
-    // Create JSON driver with encryption
-    const driver = new JsonDriver({
-      ...opts,
-      stringify: (obj) => {
-        const iv = CryptoJS.lib.WordArray.random(128 / 8);
-        const encrypted = CryptoJS.AES.encrypt(
-          JSON.stringify(obj), 
-          encryptionKey, 
-          { iv }
-        );
-        return iv.toString(CryptoJS.enc.Hex) + ':' + encrypted.toString();
-      },
-      parse: (encryptedData) => {
-        const [ivHex, encrypted] = encryptedData.split(':');
-        const iv = CryptoJS.enc.Hex.parse(ivHex);
-        const bytes = CryptoJS.AES.decrypt(encrypted, encryptionKey, { iv });
-        return JSON.parse(bytes.toString(CryptoJS.enc.Utf8));
-      }
-    });
-
-    super(driver);
-  }
+if (encryptionKey.length !== 32) {
+  throw new Error('DEEPBASE_ENCRYPTION_KEY must be a base64-encoded 32-byte key');
 }
 
-// Create an encrypted database
-const secureDB = new DeepbaseSecure({
+// AES-GCM encrypts and authenticates each value with a fresh 96-bit IV.
+const encryptValue = (value) => {
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', encryptionKey, iv);
+  const ciphertext = Buffer.concat([
+    cipher.update(JSON.stringify(value), 'utf8'),
+    cipher.final()
+  ]);
+
+  return {
+    version: 1,
+    iv: iv.toString('base64'),
+    tag: cipher.getAuthTag().toString('base64'),
+    data: ciphertext.toString('base64')
+  };
+};
+
+const decryptValue = (payload) => {
+  if (
+    !payload || payload.version !== 1 ||
+    typeof payload.iv !== 'string' ||
+    typeof payload.tag !== 'string' ||
+    typeof payload.data !== 'string'
+  ) {
+    throw new Error('Invalid encrypted payload');
+  }
+
+  const iv = Buffer.from(payload.iv, 'base64');
+  const tag = Buffer.from(payload.tag, 'base64');
+  if (iv.length !== 12 || tag.length !== 16) {
+    throw new Error('Invalid encrypted payload');
+  }
+
+  const decipher = crypto.createDecipheriv(
+    'aes-256-gcm',
+    encryptionKey,
+    iv,
+    { authTagLength: 16 }
+  );
+  decipher.setAuthTag(tag);
+
+  const plaintext = Buffer.concat([
+    decipher.update(Buffer.from(payload.data, 'base64')),
+    decipher.final()
+  ]);
+
+  return JSON.parse(plaintext.toString('utf8'));
+};
+
+const sensitiveFields = new Set([
+  'password',
+  'privateKey',
+  'mnemonic',
+  'accessToken'
+]);
+
+const seal = (value) => ({ encrypted: encryptValue(value) });
+const unseal = (value) => {
+  if (!value || typeof value !== 'object' || !value.encrypted) {
+    throw new Error('Invalid encrypted memory value');
+  }
+  return decryptValue(value.encrypted);
+};
+
+const transformSensitive = (value, path, transform) => {
+  if (sensitiveFields.has(path.at(-1))) return transform(value);
+  if (Array.isArray(value)) {
+    return value.map((item, index) =>
+      transformSensitive(item, [...path, String(index)], transform)
+    );
+  }
+  if (value !== null && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [
+        key,
+        transformSensitive(item, [...path, key], transform)
+      ])
+    );
+  }
+  return value;
+};
+
+const driver = new JsonDriver({
   path: './data',
   name: 'secure_db',
-  encryptionKey: 'your-secret-key-here'
+  // Encrypt the complete serialized database on disk.
+  stringify: (value) => JSON.stringify(encryptValue(value)),
+  parse: (text) => decryptValue(JSON.parse(text)),
+  // Encrypt only selected fields inside the driver's memory cache.
+  encodeForMemory: (value, path) =>
+    transformSensitive(value, path, seal),
+  decodeFromMemory: (value, path) =>
+    transformSensitive(value, path, unseal)
 });
 
+const secureDB = new DeepBase(driver);
 await secureDB.connect();
 
 // Use it like a regular DeepBase instance
@@ -550,8 +625,16 @@ await secureDB.set("users", "admin", { password: "secret123" });
 const admin = await secureDB.get("users", "admin");
 console.log(admin); // { password: 'secret123' }
 
-// But the file on disk is encrypted!
+// Clear the driver's long-lived cache when this instance is no longer needed.
+await secureDB.dispose({ clearMemory: true, releaseInstance: true });
 ```
+
+Generate the key once with
+`node -e "console.log(require('node:crypto').randomBytes(32).toString('base64'))"`
+and store it in a secret manager or environment variable. Reuse the same key to
+reopen the database; losing it makes the data unrecoverable. A changed file,
+wrong key, or invalid memory value causes decryption to throw instead of
+returning unauthenticated data.
 
 ## 🛠️ Creating Custom Drivers
 
@@ -610,13 +693,17 @@ MIT License - Copyright (c) Martin Clasen
 
 ## 📊 Performance
 
-DeepBase v3.0 delivers exceptional performance:
+DeepBase v3.8.4 local benchmark medians (three runs on 2026-08-06,
+1,000 sequential writes and reads per run):
 
-- ⚡ **Redis**: 6,000-7,700 ops/sec for most operations
-- 📁 **JSON**: 600,000+ ops/sec for cached reads
-- 🍃 **MongoDB**: 1,600-2,900 ops/sec balanced performance
+- 📁 **JSON**: ~597,000 cached reads/sec and ~1,500 persisted writes/sec
+- 🗃️ **SQLite** (`balanced`): ~236,000 reads/sec and ~49,100 writes/sec
+- 🏗️ **Drizzle + SQLite** (`balanced`): ~23,700 reads/sec and ~10,800 writes/sec
 
-See [Benchmark Results](./BENCHMARK_RESULTS.md) for detailed performance analysis.
+MongoDB and Redis were not available in this measurement environment, so their
+older results are not presented as current. See
+[Benchmark Results](./BENCHMARK_RESULTS.md) for the full methodology, detailed
+operations, environment, and reproduction commands. Results vary by hardware,
+dataset, durability settings, and workload.
 
 For more information, visit [GitHub](https://github.com/clasen/DeepBase)
-
