@@ -129,6 +129,52 @@ const values = await db.values('products'); // [{ price: 999 }, { price: 29 }]
 const entries = await db.entries('products'); // [['laptop', {...}], ['mouse', {...}]]
 ```
 
+### Optional Data Schema
+
+DeepBase stays schemaless unless the application supplies a schema. Schemas describe entities over normal DeepBase paths, validate future mutations, and can declare references without changing the storage format:
+
+```javascript
+import DeepBase, { DeepBaseSchemaError } from 'deepbase';
+import SqliteDriver from 'deepbase-sqlite';
+
+const schema = {
+  entities: {
+    users: {
+      path: ['users', ':id'],
+      additionalFields: false,
+      fields: {
+        name: { type: 'string', required: true },
+        tags: { type: 'array', items: { type: 'string' } }
+      }
+    },
+    posts: {
+      path: ['posts', ':id'],
+      additionalFields: true,
+      fields: {
+        title: { type: 'string', required: true },
+        authorId: { type: 'string', required: true, ref: 'users' }
+      }
+    }
+  }
+};
+
+const db = new DeepBase(new SqliteDriver({ name: 'app' }), { schema });
+await db.connect();
+
+await db.set('users', 'alice', { name: 'Alice', tags: ['admin'] });
+await db.set('posts', 'hello', { title: 'Hello', authorId: 'alice' });
+
+const audit = await db.validateSchema(); // { valid, errors }
+const model = await db.describeSchema(); // structured JSON model
+const mermaid = await db.schemaDiagram(); // Mermaid ER text
+```
+
+Field types are `string`, `number`, `boolean`, `null`, `object`, and `array`; pass an array of names for a union. Nested objects use `properties`. `additionalFields` is required per entity and also controls undeclared properties inside its nested objects. Missing references and deletion of referenced records throw `DeepBaseSchemaError` before any driver is written.
+
+Without a declared schema, `describeSchema()` infers an editable candidate from existing data. Name-based `*Id` / `*_id` relationships are reported with `candidate: true` and are never enforced automatically. Empty or heterogeneous objects are returned as warnings. `validateSchema()` requires a declared schema and performs an explicit, read-only audit of historical data.
+
+Schema integrity is serialized within one `DeepBase` instance. Applications with multiple concurrent processes writing the same database must provide external coordination.
+
 ## 🔄 Migration Between Drivers
 
 One of the most powerful features is built-in data migration:

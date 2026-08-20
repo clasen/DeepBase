@@ -9,6 +9,95 @@ export interface DisposeOptions {
     releaseInstance?: boolean;
 }
 
+export type DeepBaseSchemaType = 'array' | 'boolean' | 'null' | 'number' | 'object' | 'string';
+export type DeepBasePathSegment = string | number;
+
+export interface DeepBaseSchemaField {
+    type: DeepBaseSchemaType | DeepBaseSchemaType[];
+    required?: boolean;
+    ref?: string;
+    properties?: Record<string, DeepBaseSchemaField>;
+    items?: DeepBaseSchemaField;
+}
+
+export interface DeepBaseSchemaEntity {
+    path: string[];
+    additionalFields: boolean;
+    fields: Record<string, DeepBaseSchemaField>;
+}
+
+export interface DeepBaseSchemaDefinition {
+    entities: Record<string, DeepBaseSchemaEntity>;
+}
+
+export interface DeepBaseSchemaIssue {
+    code: string;
+    entity?: string;
+    path: DeepBasePathSegment[];
+    message: string;
+    field?: string[];
+    expected?: string | string[];
+    actual?: string;
+    targetEntity?: string;
+    value?: unknown;
+}
+
+export class DeepBaseSchemaError extends Error {
+    constructor(message: string, options?: {
+        operation?: string | null;
+        path?: DeepBasePathSegment[];
+        issues?: DeepBaseSchemaIssue[];
+        code?: string;
+    });
+
+    code: string;
+    operation: string | null;
+    path: DeepBasePathSegment[];
+    issues: DeepBaseSchemaIssue[];
+}
+
+export interface DeepBaseSchemaRelation {
+    from: { entity: string; field: string };
+    to: { entity: string; parameter: string };
+    candidate: boolean;
+}
+
+export interface DeepBaseSchemaDescriptionField {
+    path: string[];
+    type: DeepBaseSchemaType[];
+    required: boolean;
+    ref?: string;
+    present: number;
+    coverage: number;
+}
+
+export interface DeepBaseSchemaDescriptionEntity {
+    name: string;
+    path: string[];
+    additionalFields: boolean;
+    records: number;
+    fields: DeepBaseSchemaDescriptionField[];
+}
+
+export interface DeepBaseSchemaWarning {
+    code: string;
+    path: string[];
+    message: string;
+}
+
+export interface DeepBaseSchemaDescription {
+    source: 'declared' | 'inferred';
+    schema: DeepBaseSchemaDefinition;
+    entities: DeepBaseSchemaDescriptionEntity[];
+    relations: DeepBaseSchemaRelation[];
+    warnings: DeepBaseSchemaWarning[];
+}
+
+export interface DeepBaseSchemaValidationResult {
+    valid: boolean;
+    errors: DeepBaseSchemaIssue[];
+}
+
 export class DeepBaseDriver {
     constructor(options?: DeepBaseDriverOptions);
 
@@ -53,6 +142,7 @@ export interface DeepBaseOptions {
     readTimeout?: number;
     writeTimeout?: number;
     connectTimeout?: number;
+    schema?: DeepBaseSchemaDefinition;
     [key: string]: any;
 }
 
@@ -83,6 +173,7 @@ export class DeepBase {
 
     drivers: DeepBaseDriver[];
     opts: DeepBaseOptions;
+    schema: DeepBaseSchemaDefinition | null;
 
     connect(): Promise<ConnectResult>;
     disconnect(): Promise<void>;
@@ -103,6 +194,10 @@ export class DeepBase {
     values(...args: any[]): Promise<any[]>;
     entries(...args: any[]): Promise<[string, any][]>;
     len(...args: any[]): Promise<number>;
+
+    describeSchema(): Promise<DeepBaseSchemaDescription>;
+    validateSchema(): Promise<DeepBaseSchemaValidationResult>;
+    schemaDiagram(): Promise<string>;
 
     migrate(fromIndex?: number, toIndex?: number, opts?: MigrateOptions): Promise<MigrateResult>;
     syncAll(opts?: MigrateOptions): Promise<SyncResult[]>;

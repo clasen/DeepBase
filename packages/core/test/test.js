@@ -1,5 +1,11 @@
 import assert from 'assert';
-import { DeepBase, DeepBaseDriver } from '../src/index.js';
+import { createRequire } from 'module';
+import { mkdtemp, rm } from 'fs/promises';
+import { tmpdir } from 'os';
+import path from 'path';
+import { DeepBase, DeepBaseDriver, DeepBaseSchemaError } from '../src/index.js';
+
+const require = createRequire(import.meta.url);
 
 // Mock driver for testing
 class MockDriver extends DeepBaseDriver {
@@ -91,6 +97,34 @@ class MockDriver extends DeepBaseDriver {
   }
 }
 
+const relationalSchema = {
+  entities: {
+    users: {
+      path: ['users', ':id'],
+      additionalFields: false,
+      fields: {
+        name: { type: 'string', required: true },
+        email: { type: ['string', 'null'] },
+        profile: {
+          type: 'object',
+          properties: {
+            active: { type: 'boolean', required: true },
+          },
+        },
+        tags: { type: 'array', items: { type: 'string' } },
+      },
+    },
+    posts: {
+      path: ['posts', ':id'],
+      additionalFields: true,
+      fields: {
+        title: { type: 'string', required: true },
+        authorId: { type: 'string', required: true, ref: 'users' },
+      },
+    },
+  },
+};
+
 describe('DeepBase Core', function() {
   describe('Constructor', function() {
     it('should accept single driver', function() {
@@ -138,6 +172,340 @@ describe('DeepBase Core', function() {
       assert.strictEqual(db.opts.writeAll, false);
       assert.strictEqual(db.opts.readFirst, false);
       assert.strictEqual(db.opts.failOnPrimaryError, false);
+    });
+
+    it('should export schema errors from ESM and CommonJS', function() {
+      const commonjs = require('../src/index.cjs');
+      assert.strictEqual(commonjs.DeepBaseSchemaError, DeepBaseSchemaError);
+      assert.strictEqual(commonjs.DeepBase, DeepBase);
+    });
+  });
+
+  describe('Optional Schema', function() {
+    it('should reject invalid schema definitions before connecting', function() {
+      assert.throws(
+        () => new DeepBase(new MockDriver(), {
+          schema: {
+            entities: {
+              users: { path: ['users', ':id'], fields: {}, additionalFields: 'no' },
+            },
+          },
+        }),
+        (error) => error instanceof DeepBaseSchemaError && error.code === 'INVALID_SCHEMA',
+      );
+
+      assert.throws(
+        () => new DeepBase(new MockDriver(), {
+          schema: {
+            entities: {
+              posts: {
+                path: ['posts', ':id'],
+                additionalFields: false,
+                fields: { userId: { type: 'string', ref: 'missing' } },
+              },
+            },
+          },
+        }),
+        /targets unknown entity missing/,
+      );
+    });
+
+    it('should add no read or validation cost without a schema', async function() {
+      const driver = new MockDriver();
+      let reads = 0;
+      const get = driver.get.bind(driver);
+      driver.get = async (...args) => {
+        reads++;
+        return get(...args);
+      };
+      const db = new DeepBase(driver);
+
+      await db.set('free', 'shape', { anything: true });
+      assert.strictEqual(reads, 0);
+      assert.strictEqual(Object.prototype.hasOwnProperty.call(db, '_schemaMutationQueue'), false);
+    });
+
+    it('should validate types, required fields, nested objects, arrays and additional fields', async function() {
+      const driver = new MockDriver();
+      const db = new DeepBase(driver, { schema: relationalSchema });
+
+      await db.set('users', 'u1', {
+        name: 'Alice',
+        email: null,
+        profile: { active: true },
+        tags: ['admin'],
+      });
+
+      await assert.rejects(
+        db.set('users', 'u2', { profile: { active: true } }),
+        (error) => error instanceof DeepBaseSchemaError
+          && error.issues.some((item) => item.code === 'REQUIRED_FIELD'),
+      );
+      await assert.rejects(
+        db.set('users', 'u2', { name: 'Bob', profile: { active: 'yes' } }),
+        (error) => error.issues.some((item) => item.code === 'TYPE_MISMATCH'),
+      );
+      await assert.rejects(
+        db.set('users', 'u2', { name: 'Bob', unknown: true }),
+        (error) => error.issues.some((item) => item.code === 'UNKNOWN_FIELD'),
+      );
+      await assert.rejects(
+        db.set('users', 'u2', { name: 'Bob', tags: ['ok', 2] }),
+        (error) => error.issues.some((item) => item.code === 'TYPE_MISMATCH'),
+      );
+      await assert.rejects(
+        db.set('users', 'u2', { name: 'Bob', email: 42 }),
+        (error) => error.issues.some((item) => item.code === 'TYPE_MISMATCH'),
+      );
+
+      assert.strictEqual(await db.get('users', 'u2'), null);
+      await db.set('posts', 'p1', { title: 'Open shape', authorId: 'u1', extra: 1 });
+      assert.strictEqual((await db.get('posts', 'p1')).extra, 1);
+    });
+
+    it('should enforce references and restrictive deletes against proposed state', async function() {
+      const driver = new MockDriver();
+      const db = new DeepBase(driver, { schema: relationalSchema });
+
+      await assert.rejects(
+        db.set('posts', 'p1', { title: 'Broken', authorId: 'missing' }),
+        (error) => error.issues.some((item) => item.code === 'MISSING_REFERENCE'),
+      );
+      assert.strictEqual(await db.get('posts', 'p1'), null);
+
+      await db.set({
+        users: { u1: { name: 'Alice' } },
+        posts: { p1: { title: 'Together', authorId: 'u1' } },
+      });
+      await assert.rejects(
+        db.del('users', 'u1'),
+        (error) => error.issues.some((item) => item.code === 'DELETE_RESTRICTED'),
+      );
+      assert.strictEqual((await db.get('users', 'u1')).name, 'Alice');
+
+      await db.set({ users: {}, posts: {} });
+      assert.deepStrictEqual(await db.get(), { users: {}, posts: {} });
+    });
+
+    it('should audit historical data without mutating it or blocking unrelated writes', async function() {
+      const driver = new MockDriver();
+      await driver.connect();
+      await driver.set('users', 'legacy', { name: 42 });
+      const db = new DeepBase(driver, { schema: relationalSchema });
+
+      const before = JSON.parse(JSON.stringify(driver.data));
+      const audit = await db.validateSchema();
+      assert.strictEqual(audit.valid, false);
+      assert.ok(audit.errors.some((item) => item.code === 'TYPE_MISMATCH'));
+      assert.deepStrictEqual(driver.data, before);
+
+      await db.set('users', 'fresh', { name: 'Valid' });
+      await db.set('settings', 'theme', 'dark');
+      assert.strictEqual(await db.get('settings', 'theme'), 'dark');
+      assert.deepStrictEqual(await db.get('users', 'legacy'), { name: 42 });
+    });
+
+    it('should validate add, upd, inc, dec, pop and shift while invoking upd once', async function() {
+      const schema = {
+        entities: {
+          counters: {
+            path: ['counters', ':id'],
+            additionalFields: false,
+            fields: { value: { type: 'number', required: true } },
+          },
+          jobs: {
+            path: ['jobs', ':id'],
+            additionalFields: false,
+            fields: { title: { type: 'string', required: true } },
+          },
+        },
+      };
+      const driver = new MockDriver();
+      const db = new DeepBase(driver, { schema });
+
+      const job1 = await db.add('jobs', { title: 'first' });
+      const job2 = await db.add('jobs', { title: 'second' });
+      assert.strictEqual((await db.get(...job1)).title, 'first');
+
+      let calls = 0;
+      await db.upd(...job1, (job) => {
+        calls++;
+        return { title: job.title.toUpperCase() };
+      });
+      assert.strictEqual(calls, 1);
+      await assert.rejects(db.upd(...job1, () => ({ title: 1 })), DeepBaseSchemaError);
+      assert.deepStrictEqual(await db.get(...job1), { title: 'FIRST' });
+      await assert.rejects(db.upd(...job1, (job) => {
+        job.title = 1;
+        return job;
+      }), DeepBaseSchemaError);
+      assert.deepStrictEqual(await db.get(...job1), { title: 'FIRST' });
+
+      await db.set('counters', 'main', { value: 1 });
+      await db.inc('counters', 'main', 'value', 2);
+      await db.dec('counters', 'main', 'value', 1);
+      assert.strictEqual(await db.get('counters', 'main', 'value'), 2);
+
+      assert.deepStrictEqual(await db.shift('jobs'), { title: 'FIRST' });
+      assert.deepStrictEqual(await db.pop('jobs'), { title: 'second' });
+      assert.strictEqual(await db.get(...job2), null);
+    });
+
+    it('should support nullable and self-referential relationships', async function() {
+      const schema = {
+        entities: {
+          nodes: {
+            path: ['nodes', ':id'],
+            additionalFields: false,
+            fields: {
+              label: { type: 'string', required: true },
+              parentId: { type: ['string', 'null'], required: true, ref: 'nodes' },
+            },
+          },
+        },
+      };
+      const db = new DeepBase(new MockDriver(), { schema });
+      await db.set({
+        nodes: {
+          root: { label: 'Root', parentId: null },
+          child: { label: 'Child', parentId: 'root' },
+          loop: { label: 'Loop', parentId: 'loop' },
+        },
+      });
+
+      await assert.rejects(db.del('nodes', 'root'), (error) =>
+        error.issues.some((item) => item.code === 'DELETE_RESTRICTED'));
+      await db.del('nodes', 'loop');
+      assert.strictEqual(await db.get('nodes', 'loop'), null);
+    });
+
+    it('should serialize schema mutations within one DeepBase instance', async function() {
+      const schema = {
+        entities: {
+          counters: {
+            path: ['counters', ':id'],
+            additionalFields: false,
+            fields: { value: { type: 'number', required: true } },
+          },
+        },
+      };
+      const db = new DeepBase(new MockDriver(), { schema });
+      await db.set('counters', 'main', { value: 0 });
+
+      await Promise.all([
+        db.inc('counters', 'main', 'value', 1),
+        db.inc('counters', 'main', 'value', 1),
+      ]);
+      assert.strictEqual(await db.get('counters', 'main', 'value'), 2);
+    });
+
+    it('should describe declared schemas and generate deterministic Mermaid', async function() {
+      const db = new DeepBase(new MockDriver(), { schema: relationalSchema });
+      await db.set({
+        users: { u1: { name: 'Alice' } },
+        posts: { p1: { title: 'Post', authorId: 'u1' } },
+      });
+
+      const description = await db.describeSchema();
+      assert.strictEqual(description.source, 'declared');
+      assert.strictEqual(description.entities.find((entity) => entity.name === 'users').records, 1);
+      assert.deepStrictEqual(description.relations, [{
+        from: { entity: 'posts', field: 'authorId' },
+        to: { entity: 'users', parameter: 'id' },
+        candidate: false,
+      }]);
+      const diagram = await db.schemaDiagram();
+      assert.match(diagram, /^erDiagram\n/);
+      assert.match(diagram, /users \|\|--o\{ posts : authorId/);
+      assert.strictEqual(diagram, await db.schemaDiagram());
+    });
+
+    it('should infer editable schemas, warnings and candidate relationships', async function() {
+      const db = new DeepBase(new MockDriver());
+      await db.set({
+        users: {
+          u1: { name: 'Alice', age: 30 },
+          u2: { name: 'Bob', tags: [] },
+        },
+        posts: {
+          p1: { title: 'One', userId: 'u1' },
+          p2: { title: 'Two', userId: 'u2' },
+        },
+        empty: {},
+        mixed: { record: { value: true }, scalar: 1 },
+      });
+
+      const description = await db.describeSchema();
+      assert.strictEqual(description.source, 'inferred');
+      assert.strictEqual(description.schema.entities.users.fields.name.required, true);
+      assert.strictEqual(description.schema.entities.users.fields.age.required, undefined);
+      assert.strictEqual(description.schema.entities.users.fields.userId?.ref, undefined);
+      assert.strictEqual(
+        description.entities.find((entity) => entity.name === 'users').fields.find((field) => field.path[0] === 'age').coverage,
+        0.5,
+      );
+      assert.deepStrictEqual(description.relations, [{
+        from: { entity: 'posts', field: 'userId' },
+        to: { entity: 'users', parameter: 'id' },
+        candidate: true,
+      }]);
+      assert.ok(description.warnings.some((item) => item.code === 'EMPTY_OBJECT'));
+      assert.ok(description.warnings.some((item) => item.code === 'HETEROGENEOUS_OBJECT'));
+      assert.match(await db.schemaDiagram(), /userId_candidate/);
+      assert.doesNotThrow(() => new DeepBase(new MockDriver(), { schema: description.schema }));
+    });
+
+    it('should report ambiguous inferred relationships without declaring them', async function() {
+      const db = new DeepBase(new MockDriver());
+      await db.set({
+        users: { shared: { name: 'Alice' } },
+        accounts: { shared: { name: 'Primary' } },
+        posts: { p1: { ownerId: 'shared' } },
+      });
+
+      const description = await db.describeSchema();
+      assert.deepStrictEqual(description.relations, []);
+      assert.ok(description.warnings.some((item) => item.code === 'AMBIGUOUS_RELATION'));
+    });
+
+    it('should require a declared schema for full validation', async function() {
+      const db = new DeepBase(new MockDriver());
+      await assert.rejects(db.validateSchema(), /requires a declared schema/);
+    });
+
+    it('should enforce the same schema through the bundled JSON driver', async function() {
+      const directory = await mkdtemp(path.join(tmpdir(), 'deepbase-schema-'));
+      const { JsonDriver } = await import('deepbase-json');
+      const driver = new JsonDriver({ path: directory, name: 'integration' });
+      const db = new DeepBase(driver, { schema: relationalSchema });
+
+      try {
+        await db.set('users', 'u1', { name: 'Alice' });
+        await db.set('posts', 'p1', { title: 'Stored', authorId: 'u1' });
+        assert.deepStrictEqual(await db.validateSchema(), { valid: true, errors: [] });
+        await assert.rejects(db.del('users', 'u1'), DeepBaseSchemaError);
+      } finally {
+        await db.dispose({ clearMemory: true, releaseInstance: true });
+        await rm(directory, { recursive: true });
+      }
+    });
+
+    it('should escape names in Mermaid output', async function() {
+      const schema = {
+        entities: {
+          'user-data': {
+            path: ['user data', ':record_id'],
+            additionalFields: false,
+            fields: { 'display name': { type: 'string', required: true } },
+          },
+        },
+      };
+      const db = new DeepBase(new MockDriver(), { schema });
+      await db.set('user data', 'one', { 'display name': 'Alice' });
+      const diagram = await db.schemaDiagram();
+      assert.match(diagram, /user_data/);
+      assert.match(diagram, /record_id PK/);
+      assert.match(diagram, /display_name/);
     });
   });
 
@@ -721,4 +1089,3 @@ describe('DeepBase Core', function() {
     });
   });
 });
-

@@ -135,6 +135,51 @@ try {
 
 See [TIMEOUT_FEATURE.md](https://github.com/clasen/DeepBase/blob/main/TIMEOUT_FEATURE.md) for detailed documentation.
 
+## Optional Data Schema
+
+DeepBase remains schemaless by default. Pass `schema` as a constructor option to validate future mutations and declare relationships over normal DeepBase paths:
+
+```javascript
+import DeepBase, { DeepBaseSchemaError } from 'deepbase';
+import { JsonDriver } from 'deepbase-json';
+
+const schema = {
+  entities: {
+    users: {
+      path: ['users', ':id'],
+      additionalFields: false,
+      fields: {
+        name: { type: 'string', required: true },
+        profile: {
+          type: 'object',
+          properties: { active: { type: 'boolean', required: true } }
+        }
+      }
+    },
+    posts: {
+      path: ['posts', ':id'],
+      additionalFields: true,
+      fields: {
+        title: { type: 'string', required: true },
+        authorId: { type: ['string', 'null'], ref: 'users' }
+      }
+    }
+  }
+};
+
+const db = new DeepBase(new JsonDriver({ name: 'app' }), { schema });
+await db.set('users', 'alice', { name: 'Alice', profile: { active: true } });
+await db.set('posts', 'hello', { title: 'Hello', authorId: 'alice' });
+
+await db.validateSchema(); // explicit read-only audit: { valid, errors }
+await db.describeSchema(); // deterministic structured model
+await db.schemaDiagram();  // Mermaid ER text
+```
+
+Supported types are `string`, `number`, `boolean`, `null`, `object`, and `array`. Objects use `properties`; arrays use `items`; omitted `required` means optional. `additionalFields` is required per entity and applies to nested declared objects too. References use the destination entity's final path parameter. Missing destinations and deletion of referenced records throw `DeepBaseSchemaError` before writing any driver.
+
+When no schema is declared, `describeSchema()` infers an editable candidate. Relationships suggested from `*Id` / `*_id` fields are marked `candidate: true` and never enforced. `validateSchema()` requires a declared schema. Enforcement is serialized within one `DeepBase` instance; concurrent writers in other processes require external coordination.
+
 ## API
 
 ### Constructor
@@ -154,6 +199,7 @@ new DeepBase(drivers, options)
   - `readTimeout` (default: `timeout`): Timeout for read operations in ms
   - `writeTimeout` (default: `timeout`): Timeout for write operations in ms
   - `connectTimeout` (default: `timeout`): Timeout for connection in ms
+  - `schema`: Optional application-owned entity schema
 
 ### Methods
 
@@ -182,6 +228,11 @@ new DeepBase(drivers, options)
 - `await db.values(...path)` - Get values at path
 - `await db.entries(...path)` - Get entries at path
 - `await db.len(...path)` - Count the number of keys at path
+
+#### Schema Operations
+- `await db.describeSchema()` - Describe the declared or inferred model as JSON
+- `await db.validateSchema()` - Audit all stored data against the declared schema
+- `await db.schemaDiagram()` - Generate a Mermaid ER diagram
 
 #### Migration
 - `await db.migrate(fromIndex, toIndex, options)` - Migrate data between drivers
@@ -314,4 +365,3 @@ console.log(await db.get('token')); // 'sk-super-secret' (file on disk is encryp
 ## License
 
 MIT - Copyright (c) Martin Clasen
-

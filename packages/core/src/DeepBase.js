@@ -1,4 +1,17 @@
 import { DeepBaseDriver } from './DeepBaseDriver.js';
+import {
+  DeepBaseSchemaError,
+  cloneData,
+  compileSchema,
+  deleteAtPath,
+  describeDeclaredSchema,
+  describeInferredSchema,
+  getAtPath,
+  schemaToMermaid,
+  setAtPath,
+  validateData,
+  validateMutation,
+} from './schema.js';
 
 /**
  * Helper to wrap a promise with a timeout
@@ -38,7 +51,7 @@ async function createJsonDriver(options = {}) {
 }
 
 export class DeepBase {
-  constructor(drivers = [], {writeAll, readFirst, failOnPrimaryError, lazyConnect, timeout, readTimeout, writeTimeout, ...opts} = {}) {
+  constructor(drivers = [], {writeAll, readFirst, failOnPrimaryError, lazyConnect, timeout, readTimeout, writeTimeout, schema, ...opts} = {}) {
     // Support backward compatibility: new DeepBase({ name: "db" })
     // If first argument is a plain object (not a driver), treat it as JsonDriver options
     if (!Array.isArray(drivers) && !(drivers instanceof DeepBaseDriver) && 
@@ -57,6 +70,9 @@ export class DeepBase {
     this._driversInitialized = false;
     
     this.drivers = drivers;
+    this._schema = schema === undefined ? null : compileSchema(schema);
+    this.schema = this._schema ? cloneData(this._schema.publicSchema) : null;
+    if (this._schema) this._schemaMutationQueue = Promise.resolve();
     
     this.opts = {
       writeAll: writeAll !== false, // Write to all drivers by default
@@ -214,6 +230,27 @@ export class DeepBase {
       operationName
     );
   }
+
+  async _runSchemaMutation(operationName, operation) {
+    await this._ensureConnected();
+    const result = this._schemaMutationQueue.then(operation, operation);
+    this._schemaMutationQueue = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return withTimeout(result, this.opts.writeTimeout, operationName);
+  }
+
+  _assertSchemaMutation(operationName, path, before, after) {
+    const issues = validateMutation(before, after, path, this._schema);
+    if (issues.length > 0) {
+      throw new DeepBaseSchemaError(`${operationName} violates the DeepBase schema`, {
+        operation: operationName,
+        path,
+        issues,
+      });
+    }
+  }
   
   async get(...args) {
     return this._runReadOperation('get()', 'get', args);
@@ -227,22 +264,71 @@ export class DeepBase {
   }
   
   async set(...args) {
+    if (this._schema) {
+      return this._runSchemaMutation('set()', async () => {
+        if (args.length === 0) throw new Error('set() requires at least one argument');
+        const path = args.slice(0, -1);
+        const before = await this._readFromDrivers('get', []);
+        const after = setAtPath(before, path, args.at(-1));
+        this._assertSchemaMutation('set()', path, before, after);
+        return this._writeToDrivers('set', args);
+      });
+    }
     return this._runWriteOperation('set()', 'set', args);
   }
   
   async del(...args) {
+    if (this._schema) {
+      return this._runSchemaMutation('del()', async () => {
+        const before = await this._readFromDrivers('get', []);
+        const after = deleteAtPath(before, args);
+        this._assertSchemaMutation('del()', args, before, after);
+        return this._writeToDrivers('del', args);
+      });
+    }
     return this._runWriteOperation('del()', 'del', args);
   }
   
   async inc(...args) {
+    if (this._schema) {
+      return this._runSchemaMutation('inc()', async () => {
+        const path = args.slice(0, -1);
+        const before = await this._readFromDrivers('get', []);
+        const after = setAtPath(before, path, getAtPath(before, path) + args.at(-1));
+        this._assertSchemaMutation('inc()', path, before, after);
+        return this._writeToDrivers('inc', args);
+      });
+    }
     return this._runWriteOperation('inc()', 'inc', args);
   }
   
   async dec(...args) {
+    if (this._schema) {
+      return this._runSchemaMutation('dec()', async () => {
+        const path = args.slice(0, -1);
+        const before = await this._readFromDrivers('get', []);
+        const after = setAtPath(before, path, getAtPath(before, path) - args.at(-1));
+        this._assertSchemaMutation('dec()', path, before, after);
+        return this._writeToDrivers('dec', args);
+      });
+    }
     return this._runWriteOperation('dec()', 'dec', args);
   }
   
   async add(...args) {
+    if (this._schema) {
+      return this._runSchemaMutation('add()', async () => {
+        const value = args.at(-1);
+        const parentPath = args.slice(0, -1);
+        const id = this.drivers[0].nanoid();
+        const path = [...parentPath, id];
+        const before = await this._readFromDrivers('get', []);
+        const after = setAtPath(before, path, value);
+        this._assertSchemaMutation('add()', path, before, after);
+        await this._writeToDrivers('set', [...path, value]);
+        return path;
+      });
+    }
     await this._ensureConnected();
     
     const operation = async () => {
@@ -262,6 +348,18 @@ export class DeepBase {
   }
   
   async upd(...args) {
+    if (this._schema) {
+      return this._runSchemaMutation('upd()', async () => {
+        const update = args.at(-1);
+        const path = args.slice(0, -1);
+        if (typeof update !== 'function') throw new TypeError('upd() requires an update function');
+        const before = await this._readFromDrivers('get', []);
+        const value = update(cloneData(getAtPath(before, path)));
+        const after = setAtPath(before, path, value);
+        this._assertSchemaMutation('upd()', path, before, after);
+        return this._writeToDrivers('upd', [...path, () => value]);
+      });
+    }
     return this._runWriteOperation('upd()', 'upd', args);
   }
 
@@ -274,6 +372,7 @@ export class DeepBase {
   }
   
   async pop(...args) {
+    if (this._schema) return this._removeSchemaBoundary('pop()', 'last', args);
     await this._ensureConnected();
     
     const operation = async () => {
@@ -293,6 +392,7 @@ export class DeepBase {
   }
   
   async shift(...args) {
+    if (this._schema) return this._removeSchemaBoundary('shift()', 'first', args);
     await this._ensureConnected();
     
     const operation = async () => {
@@ -309,6 +409,40 @@ export class DeepBase {
     };
     
     return withTimeout(operation(), this.opts.writeTimeout, 'shift()');
+  }
+
+  async _removeSchemaBoundary(operationName, boundaryMethod, path) {
+    return this._runSchemaMutation(operationName, async () => {
+      const key = await this._readFromDrivers(boundaryMethod, path);
+      if (key === undefined) return undefined;
+      const itemPath = [...path, key];
+      const value = await this._readFromDrivers('get', itemPath);
+      const before = await this._readFromDrivers('get', []);
+      const after = deleteAtPath(before, itemPath);
+      this._assertSchemaMutation(operationName, itemPath, before, after);
+      await this._writeToDrivers('del', itemPath);
+      return value;
+    });
+  }
+
+  async describeSchema() {
+    await this._ensureConnected();
+    const root = await this._runReadOperation('describeSchema()', 'get', []);
+    return this._schema
+      ? describeDeclaredSchema(root, this._schema)
+      : describeInferredSchema(root);
+  }
+
+  async validateSchema() {
+    if (!this._schema) throw new Error('validateSchema() requires a declared schema');
+    await this._ensureConnected();
+    const root = await this._runReadOperation('validateSchema()', 'get', []);
+    const errors = validateData(root, this._schema);
+    return { valid: errors.length === 0, errors };
+  }
+
+  async schemaDiagram() {
+    return schemaToMermaid(await this.describeSchema());
   }
   
   async keys(...args) {
@@ -443,4 +577,3 @@ export class DeepBase {
     return this.drivers;
   }
 }
-
