@@ -28,10 +28,13 @@ Stores data in SQLite database files. Perfect for:
 
 ```javascript
 import DeepBase from 'deepbase';
+import { resolvePath } from 'deepbase/path';
 import SqliteDriver from 'deepbase-sqlite';
 
+const dataPath = resolvePath(import.meta.url, './data');
+
 const db = new DeepBase(new SqliteDriver({
-  path: './data',
+  path: dataPath,
   name: 'mydb',
   pragma: 'balanced' // default — omit for same result
 }));
@@ -42,11 +45,15 @@ await db.set('users', 'alice', { name: 'Alice', age: 30 });
 const alice = await db.get('users', 'alice');
 ```
 
+`path` is required and must be absolute. `resolvePath()` anchors a relative
+path to your application module instead of `process.cwd()` or the installed
+package location.
+
 ## Options
 
 ```javascript
 new SqliteDriver({
-  path: './data',              // Directory to store database files
+  path: '/var/lib/myapp/data', // Required absolute directory for database files
   name: 'default',            // Database filename (without .db)
   pragma: 'balanced',         // Performance profile: 'none' | 'safe' | 'balanced' | 'fast'
   busyTimeoutMs: 5000,        // Native wait per lock attempt
@@ -75,8 +82,8 @@ Uses `better-sqlite3` for synchronous operations wrapped in async API:
 Multiple instances and same-host processes may safely point to the same database file. Each driver owns its connection and lifecycle; SQLite coordinates writers using WAL, `BEGIN IMMEDIATE`, a busy timeout, and bounded transaction retries:
 
 ```javascript
-const db1 = new DeepBase(new SqliteDriver({ name: 'mydb' }));
-const db2 = new DeepBase(new SqliteDriver({ name: 'mydb' }));
+const db1 = new DeepBase(new SqliteDriver({ path: '/var/lib/myapp/data', name: 'mydb' }));
+const db2 = new DeepBase(new SqliteDriver({ path: '/var/lib/myapp/data', name: 'mydb' }));
 // Independent connections; disconnecting db1 does not close db2.
 ```
 
@@ -160,16 +167,16 @@ All WAL modes use `journal_mode=WAL` and `temp_store=MEMORY`. Lock waiting is co
 
 ```javascript
 // Backward-compatible (no PRAGMAs, no WITHOUT ROWID)
-new SqliteDriver({ name: 'mydb', pragma: 'none' })
+new SqliteDriver({ path: '/var/lib/myapp/data', name: 'mydb', pragma: 'none' })
 
 // Maximum durability
-new SqliteDriver({ name: 'mydb', pragma: 'safe' })
+new SqliteDriver({ path: '/var/lib/myapp/data', name: 'mydb', pragma: 'safe' })
 
 // Recommended (default)
-new SqliteDriver({ name: 'mydb', pragma: 'balanced' })
+new SqliteDriver({ path: '/var/lib/myapp/data', name: 'mydb', pragma: 'balanced' })
 
 // Maximum throughput
-new SqliteDriver({ name: 'mydb', pragma: 'fast' })
+new SqliteDriver({ path: '/var/lib/myapp/data', name: 'mydb', pragma: 'fast' })
 ```
 
 `SqliteFastDriver` is kept as a named alias for backward compatibility:
@@ -237,7 +244,7 @@ import SqliteDriver from 'deepbase-sqlite';
 import MongoDriver from 'deepbase-mongodb';
 
 const db = new DeepBase([
-  new SqliteDriver({ path: './data' }),
+  new SqliteDriver({ path: '/var/lib/myapp/data' }),
   new MongoDriver({ url: 'mongodb://localhost:27017' })
 ]);
 
@@ -379,5 +386,3 @@ Notes:
 ## License
 
 MIT - Copyright (c) Martin Clasen
-
-

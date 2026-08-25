@@ -371,7 +371,7 @@ import JsonDriver from 'deepbase-json';
 const db = new DeepBase(
   typeof window !== 'undefined'
     ? new IndexedDBDriver({ name: 'myapp' })
-    : new JsonDriver({ path: './data', name: 'myapp' })
+    : new JsonDriver({ path: '/var/lib/myapp/data', name: 'myapp' })
 );
 
 await db.connect();
@@ -511,4 +511,3 @@ MIT License - Copyright (c) Martin Clasen
 ---
 
 🚀 **Build amazing offline-first web apps with DeepBase + IndexedDB!**
-

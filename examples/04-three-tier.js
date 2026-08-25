@@ -1,7 +1,11 @@
 // Example 4: Three-tier setup (MongoDB primary, JSON secondary, Redis cache)
-import DeepBase, { JsonDriver } from '../packages/core/src/index.js';
+import DeepBase from '../packages/core/src/index.js';
+import { resolvePath } from '../packages/core/src/path.js';
+import { JsonDriver } from '../packages/driver-json/src/index.js';
 import MongoDriver from '../packages/driver-mongodb/src/index.js'; // deepbase-mongodb
 import RedisDriver from '../packages/driver-redis/src/index.js'; // deepbase-redis
+
+const dataPath = resolvePath(import.meta.url, './data');
 
 async function main() {
   console.log('🌳 DeepBase Example 4: Three-Tier Architecture\n');
@@ -16,7 +20,7 @@ async function main() {
     }),
     new JsonDriver({ 
       name: 'threetier_backup', 
-      path: './data' 
+      path: dataPath
     }),
     new RedisDriver({ 
       url: 'redis://localhost:6379',
@@ -89,4 +93,3 @@ async function main() {
 }
 
 main().catch(console.error);
-

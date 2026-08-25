@@ -4,7 +4,8 @@ export type MemoryTransform = (value: unknown, path: string[]) => unknown;
 
 export interface JsonDriverOptions extends DeepBaseDriverOptions {
     name?: string;
-    path?: string;
+    /** Required absolute storage directory. */
+    path: string;
     stringify?: (obj: any) => string;
     parse?: (str: string) => any;
     /** Enable cross-process file locking for safe multi-process access */
@@ -16,7 +17,7 @@ export interface JsonDriverOptions extends DeepBaseDriverOptions {
 }
 
 export class JsonDriver extends DeepBaseDriver {
-    constructor(options?: JsonDriverOptions);
+    constructor(options: JsonDriverOptions);
 
     name: string;
     path: string;

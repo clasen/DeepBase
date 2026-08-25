@@ -11,9 +11,13 @@ export class SqliteDriver extends DeepBaseDriver {
   constructor({ name, path, pragma, busyTimeoutMs, busyRetry, ...opts } = {}) {
     super(opts);
 
+    if (typeof path !== 'string' || path.trim() === '' || !pathModule.isAbsolute(path)) {
+      throw new TypeError('SqliteDriver requires an absolute "path" option.');
+    }
+
     const config = resolveSqliteConfig({ pragma, busyTimeoutMs, busyRetry });
     this.name = name || 'default';
-    this.path = path || pathModule.join(process.cwd(), 'db');
+    this.path = path;
     this.pragma = config.pragma;
     this.pragmaConfig = config.pragmaConfig;
     this.busyTimeoutMs = config.busyTimeoutMs;

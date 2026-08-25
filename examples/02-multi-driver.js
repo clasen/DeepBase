@@ -1,7 +1,10 @@
 // Example 2: Multi-driver with MongoDB primary and JSON backup
 import DeepBase from '../packages/core/src/index.js';
+import { resolvePath } from '../packages/core/src/path.js';
 import JsonDriver from '../packages/driver-json/src/index.js';
 import MongoDriver from '../packages/driver-mongodb/src/index.js'; // deepbase-mongodb
+
+const dataPath = resolvePath(import.meta.url, './data');
 
 async function main() {
   console.log('🌳 DeepBase Example 2: Multi-Driver (MongoDB + JSON)\n');
@@ -15,7 +18,7 @@ async function main() {
     }),
     new JsonDriver({ 
       name: 'backup', 
-      path: './data' 
+      path: dataPath
     })
   ], {
     writeAll: true,           // Write to all drivers
@@ -54,4 +57,3 @@ async function main() {
 }
 
 main().catch(console.error);
-

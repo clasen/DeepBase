@@ -284,7 +284,7 @@ Combine drivers for maximum performance and reliability:
 const db = new DeepBase([
   new RedisDriver({ url: 'redis://...' }),    // Fast cache
   new MongoDriver({ url: 'mongodb://...' }),  // Persistent storage
-  new JsonDriver({ path: './backup' })        // Local backup
+  new JsonDriver({ path: '/var/lib/myapp/backup' })        // Local backup
 ]);
 ```
 

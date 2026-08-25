@@ -19,14 +19,15 @@ export interface SqliteCheckpointResult {
 
 export interface SqliteDriverOptions extends DeepBaseDriverOptions {
     name?: string;
-    path?: string;
+    /** Required absolute storage directory. */
+    path: string;
     pragma?: 'none' | 'safe' | 'balanced' | 'fast';
     busyTimeoutMs?: number;
     busyRetry?: SqliteBusyRetryOptions;
 }
 
 export class SqliteDriver extends DeepBaseDriver {
-    constructor(options?: SqliteDriverOptions);
+    constructor(options: SqliteDriverOptions);
 
     name: string;
     path: string;

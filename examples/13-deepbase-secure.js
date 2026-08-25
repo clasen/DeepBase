@@ -1,5 +1,6 @@
 import CryptoJS from 'crypto-js';
 import { DeepBase } from '../packages/core/src/index.js';
+import { resolvePath } from '../packages/core/src/path.js';
 import { JsonDriver } from '../packages/driver-json/src/index.js';
 
 class DeepbaseSecure extends DeepBase {
@@ -35,7 +36,7 @@ class DeepbaseSecure extends DeepBase {
 
 const db = new DeepbaseSecure({
     name: 'secure-demo',
-    path: './db',
+    path: resolvePath(import.meta.url, './db'),
     encryptionKey: 'my-secret-key-123'
 });
 

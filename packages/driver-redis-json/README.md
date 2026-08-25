@@ -116,12 +116,12 @@ Use Redis as a cache layer:
 ```javascript
 import DeepBase from '@deepbase/core';
 import MongoDriver from 'deepbase-mongodb';
-import { JsonDriver } from 'deepbase';
+import { JsonDriver } from 'deepbase-json';
 import RedisDriver from '@deepbase/redis';
 
 const db = new DeepBase([
   new MongoDriver({ url: 'mongodb://localhost:27017' }),  // Primary
-  new JsonDriver({ path: './backup' }),                   // Backup
+  new JsonDriver({ path: '/var/lib/myapp/backup' }),                   // Backup
   new RedisDriver({ url: 'redis://localhost:6379' })      // Cache
 ], {
   writeAll: true,           // Write to all three
@@ -222,4 +222,3 @@ try {
 ## License
 
 MIT - Copyright (c) Martin Clasen
-

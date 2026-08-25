@@ -38,6 +38,19 @@ describe('JsonDriver', function() {
     }
   });
 
+  describe('Configuration', function() {
+    it('should require an absolute storage path', function() {
+      assert.throws(
+        () => new JsonDriver({ name: 'missing-path' }),
+        /requires an absolute "path" option/,
+      );
+      assert.throws(
+        () => new JsonDriver({ name: 'relative-path', path: './data' }),
+        /requires an absolute "path" option/,
+      );
+    });
+  });
+
   describe('Basic Operations', function() {
     it('should set and get a simple value', async function() {
       await db.set('key', 'value');
@@ -1066,4 +1079,3 @@ describe('Multi-Driver: JsonDriver + SqliteDriver (add + pop + shift)', function
     assert.deepStrictEqual(Object.values(sqliteTasks)[0], { name: 'test', prio: 2 });
   });
 });
-

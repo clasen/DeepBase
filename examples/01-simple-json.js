@@ -1,5 +1,8 @@
 // Example 1: Simple JSON driver usage
 import DeepBase from '../packages/core/src/index.js';
+import { resolvePath } from '../packages/core/src/path.js';
+
+const dataPath = resolvePath(import.meta.url, './data');
 
 async function main() {
   console.log('🌳 DeepBase Example 1: Simple JSON Driver\n');
@@ -8,7 +11,7 @@ async function main() {
   // Option 1: Using the backward-compatible syntax
   const db = new DeepBase({ 
     name: 'example1', 
-    path: './data' 
+    path: dataPath
   });
   
   await db.connect();
@@ -42,4 +45,3 @@ async function main() {
 }
 
 main().catch(console.error);
-

@@ -1,6 +1,10 @@
 // Example 3: Migrating from JSON to MongoDB
-import DeepBase, { JsonDriver } from '../packages/core/src/index.js';
+import DeepBase from '../packages/core/src/index.js';
+import { resolvePath } from '../packages/core/src/path.js';
+import { JsonDriver } from '../packages/driver-json/src/index.js';
 import MongoDriver from '../packages/driver-mongodb/src/index.js'; // deepbase-mongodb
+
+const dataPath = resolvePath(import.meta.url, './data');
 
 async function main() {
   console.log('🌳 DeepBase Example 3: Migration from JSON to MongoDB\n');
@@ -9,7 +13,7 @@ async function main() {
   console.log('📝 Step 1: Creating initial data in JSON...');
   const jsonDb = new DeepBase(new JsonDriver({ 
     name: 'migration_source', 
-    path: './data' 
+    path: dataPath
   }));
   
   await jsonDb.connect();
@@ -35,7 +39,7 @@ async function main() {
   // Step 2: Setup multi-driver with JSON and MongoDB
   console.log('\n🔄 Step 2: Setting up multi-driver (JSON + MongoDB)...');
   const db = new DeepBase([
-    new JsonDriver({ name: 'migration_source', path: './data' }),
+    new JsonDriver({ name: 'migration_source', path: dataPath }),
     new MongoDriver({ 
       url: 'mongodb://localhost:27017',
       database: 'deepbase_migrated',
@@ -71,4 +75,3 @@ async function main() {
 }
 
 main().catch(console.error);
-

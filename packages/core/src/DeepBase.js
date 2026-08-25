@@ -39,20 +39,25 @@ function withTimeout(promise, ms, operation = 'operation') {
  * @returns {Promise<DeepBaseDriver>} JsonDriver instance
  */
 async function createJsonDriver(options = {}) {
+  let JsonDriver;
+
   try {
-    const { JsonDriver } = await import('deepbase-json');
-    return new JsonDriver(options);
+    ({ JsonDriver } = await import('deepbase-json'));
   } catch (error) {
-    throw new Error(
+    const wrapped = new Error(
       'JsonDriver not available. ' +
       'Please provide a driver or install deepbase-json: npm install deepbase-json'
     );
+    wrapped.cause = error;
+    throw wrapped;
   }
+
+  return new JsonDriver(options);
 }
 
 export class DeepBase {
   constructor(drivers = [], {writeAll, readFirst, failOnPrimaryError, lazyConnect, timeout, readTimeout, writeTimeout, schema, ...opts} = {}) {
-    // Support backward compatibility: new DeepBase({ name: "db" })
+    // Support shorthand JSON options: new DeepBase({ path: "/absolute/path", name: "db" })
     // If first argument is a plain object (not a driver), treat it as JsonDriver options
     if (!Array.isArray(drivers) && !(drivers instanceof DeepBaseDriver) && 
         typeof drivers === 'object' && drivers !== null) {

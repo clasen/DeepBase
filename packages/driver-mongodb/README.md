@@ -106,14 +106,14 @@ Common pattern: MongoDB for production, JSON for backup:
 ```javascript
 import DeepBase from 'deepbase';
 import MongoDriver from 'deepbase-mongodb';
-import { JsonDriver } from 'deepbase';
+import { JsonDriver } from 'deepbase-json';
 
 const db = new DeepBase([
   new MongoDriver({ 
     url: process.env.MONGO_URL,
     database: 'production'
   }),
-  new JsonDriver({ path: './backup' })
+  new JsonDriver({ path: '/var/lib/myapp/backup' })
 ], {
   writeAll: true,           // Replicate to JSON
   failOnPrimaryError: false // Fallback to JSON if MongoDB fails
@@ -128,11 +128,11 @@ Migrate existing JSON data to MongoDB:
 
 ```javascript
 import DeepBase from '@deepbase/core';
-import { JsonDriver } from 'deepbase';
+import { JsonDriver } from 'deepbase-json';
 import MongoDriver from '@deepbase/mongodb';
 
 const db = new DeepBase([
-  new JsonDriver({ path: './data' }),
+  new JsonDriver({ path: '/var/lib/myapp/data' }),
   new MongoDriver({ url: 'mongodb://localhost:27017' })
 ]);
 
@@ -180,4 +180,3 @@ try {
 ## License
 
 MIT - Copyright (c) Martin Clasen
-

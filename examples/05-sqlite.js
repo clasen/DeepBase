@@ -1,6 +1,9 @@
 // Example 5: SQLite driver usage
 import DeepBase from '../packages/core/src/index.js';
+import { resolvePath } from '../packages/core/src/path.js';
 import SqliteDriver from '../packages/driver-sqlite/src/index.js';
+
+const dataPath = resolvePath(import.meta.url, './data');
 
 async function main() {
   console.log('🌳 DeepBase Example 5: SQLite Driver\n');
@@ -8,7 +11,7 @@ async function main() {
   // Create a DeepBase with SQLite driver
   const db = new DeepBase(new SqliteDriver({
     name: 'example5',
-    path: './data'
+    path: dataPath
   }));
 
   await db.connect();
@@ -26,5 +29,4 @@ async function main() {
 }
 
 main().catch(console.error);
-
 

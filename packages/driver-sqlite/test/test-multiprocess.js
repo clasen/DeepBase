@@ -68,15 +68,15 @@ describe('SqliteDriver multi-process safety', function () {
 
   it('validates concurrency options eagerly', function () {
     assert.throws(
-      () => new SqliteDriver({ pragma: 'invalid' }),
+      () => new SqliteDriver({ path: testDataPath, pragma: 'invalid' }),
       /pragma must be one of/,
     );
     assert.throws(
-      () => new SqliteDriver({ busyTimeoutMs: -1 }),
+      () => new SqliteDriver({ path: testDataPath, busyTimeoutMs: -1 }),
       /busyTimeoutMs must be a non-negative integer/,
     );
     assert.throws(
-      () => new SqliteDriver({ busyRetry: { maxAttempts: 0 } }),
+      () => new SqliteDriver({ path: testDataPath, busyRetry: { maxAttempts: 0 } }),
       /maxAttempts must be at least 1/,
     );
   });

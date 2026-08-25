@@ -1,5 +1,8 @@
 import { DeepBase } from '../packages/core/src/index.js';
+import { resolvePath } from '../packages/core/src/path.js';
 import { JsonDriver } from '../packages/driver-json/src/index.js';
+
+const dataPath = resolvePath(import.meta.url, './data');
 
 // Custom slow driver for testing timeouts
 class SlowDriver extends JsonDriver {
@@ -27,7 +30,7 @@ async function demoTimeout() {
   // Example 1: Global timeout
   console.log('📌 Example 1: Global timeout (3 seconds)');
   const db1 = new DeepBase(
-    [new SlowDriver({ name: 'slow-db', delay: 5000 })],
+    [new SlowDriver({ name: 'slow-db', path: dataPath, delay: 5000 })],
     { timeout: 3000 } // 3 second timeout for all operations
   );
   
@@ -42,7 +45,7 @@ async function demoTimeout() {
   // Example 2: Separate read/write timeouts
   console.log('\n📌 Example 2: Separate read/write timeouts');
   const db2 = new DeepBase(
-    [new SlowDriver({ name: 'slow-db2', delay: 2000 })],
+    [new SlowDriver({ name: 'slow-db2', path: dataPath, delay: 2000 })],
     { 
       readTimeout: 1000,  // 1 second for reads
       writeTimeout: 5000  // 5 seconds for writes
@@ -74,7 +77,7 @@ async function demoTimeout() {
   // Example 3: No timeout (default behavior)
   console.log('\n📌 Example 3: No timeout (will wait forever)');
   const db3 = new DeepBase(
-    [new JsonDriver({ name: 'normal-db' })],
+    [new JsonDriver({ name: 'normal-db', path: dataPath })],
     { timeout: 0 } // 0 = disabled (default)
   );
   
@@ -90,7 +93,7 @@ async function demoTimeout() {
   // Example 4: Connection timeout
   console.log('\n📌 Example 4: Connection timeout');
   const db4 = new DeepBase(
-    [new SlowDriver({ name: 'slow-connect', delay: 0 })],
+    [new SlowDriver({ name: 'slow-connect', path: dataPath, delay: 0 })],
     { 
       connectTimeout: 2000, // 2 second connection timeout
       lazyConnect: false
@@ -109,4 +112,3 @@ async function demoTimeout() {
 
 // Run the demo
 demoTimeout().catch(console.error);
-

@@ -31,40 +31,47 @@ DeepBase v3.0 is split into modular packages:
 ### Simple JSON Driver
 
 ```bash
-npm install deepbase
-# deepbase automatically includes deepbase-json
+npm install deepbase deepbase-json
 ```
 
 ```javascript
 import DeepBase from 'deepbase';
+import { resolvePath } from 'deepbase/path';
+
+const dataPath = resolvePath(import.meta.url, './data');
 
 // Option 1: Backward-compatible syntax (uses JSON driver by default)
-const db = new DeepBase({ path: './data', name: 'mydb' });
+const db = new DeepBase({ path: dataPath, name: 'mydb' });
 await db.connect();
 
 // Option 2: Explicit JSON driver
-import { JsonDriver } from 'deepbase';
-const db = new DeepBase(new JsonDriver({ path: './data', name: 'mydb' }));
-await db.connect();
+import { JsonDriver } from 'deepbase-json';
+const explicitDb = new DeepBase(new JsonDriver({ path: dataPath, name: 'mydb' }));
+await explicitDb.connect();
 
 await db.set('users', 'alice', { name: 'Alice', age: 30 });
 const alice = await db.get('users', 'alice');
 console.log(alice); // { name: 'Alice', age: 30 }
 ```
 
+`path` is required and must be absolute. `resolvePath()` anchors a relative
+path to your application module instead of `process.cwd()` or the installed
+package location.
+
 ### Multi-Driver Setup (MongoDB + JSON Backup)
 
 ```bash
-npm install deepbase deepbase-mongodb
+npm install deepbase deepbase-json deepbase-mongodb
 ```
 
 ```javascript
-import DeepBase, { JsonDriver } from 'deepbase';
+import DeepBase from 'deepbase';
+import { JsonDriver } from 'deepbase-json';
 import MongoDriver from 'deepbase-mongodb';
 
 const db = new DeepBase([
   new MongoDriver({ url: 'mongodb://localhost:27017' }),
-  new JsonDriver({ path: './backup' })
+  new JsonDriver({ path: '/var/lib/myapp/backup' })
 ], {
   writeAll: true,           // Write to all drivers
   readFirst: true,          // Read from first available
@@ -140,7 +147,7 @@ import MongoDriver from '@deepbase/mongodb';
 
 // Setup with both drivers
 const db = new DeepBase([
-  new JsonDriver({ path: './data', name: 'mydb' }), // Source (index 0)
+  new JsonDriver({ path: '/var/lib/myapp/data', name: 'mydb' }), // Source (index 0)
   new MongoDriver({ url: 'mongodb://localhost:27017' }) // Target (index 1)
 ]);
 
@@ -177,7 +184,7 @@ import RedisDriver from '@deepbase/redis';
 
 const db = new DeepBase([
   new MongoDriver({ url: 'mongodb://localhost:27017' }),  // Primary
-  new JsonDriver({ path: './persistence' }),              // Backup
+  new JsonDriver({ path: '/var/lib/myapp/persistence' }),              // Backup
   new RedisDriver({ url: 'redis://localhost:6379' })      // Cache
 ], {
   writeAll: true,           // Replicate writes to all three
@@ -281,17 +288,18 @@ See [`examples/08-concurrency-safe.js`](./examples/08-concurrency-safe.js) for d
 Prevent operations from hanging indefinitely with configurable timeouts:
 
 ```javascript
-import DeepBase, { JsonDriver } from 'deepbase';
+import DeepBase from 'deepbase';
+import { JsonDriver } from 'deepbase-json';
 
 // Global timeout for all operations
-const db = new DeepBase(new JsonDriver(), {
+const db = new DeepBase(new JsonDriver({ path: '/var/lib/myapp/data' }), {
   timeout: 5000  // 5 seconds for all operations
 });
 
 // Different timeouts for reads and writes
 const db2 = new DeepBase([
   new RedisDriver({ url: 'redis://slow-server:6379' }),
-  new JsonDriver({ path: './backup' }) // Fallback if Redis times out
+  new JsonDriver({ path: '/var/lib/myapp/backup' }) // Fallback if Redis times out
 ], {
   readTimeout: 2000,   // 2 seconds for reads (get, keys, values, entries)
   writeTimeout: 5000,  // 5 seconds for writes (set, del, inc, dec, add, upd)
@@ -332,7 +340,7 @@ Filesystem-based JSON storage. Perfect for:
 
 ```javascript
 new JsonDriver({
-  path: './data',           // Storage directory
+  path: '/var/lib/myapp/data', // Required absolute storage directory
   name: 'mydb',            // Filename (mydb.json)
   stringify: JSON.stringify, // Custom serializer
   parse: JSON.parse        // Custom parser
@@ -351,7 +359,7 @@ SQLite embedded database. Perfect for:
 
 ```javascript
 new SqliteDriver({
-  path: './data',          // Storage directory
+  path: '/var/lib/myapp/data', // Required absolute storage directory
   name: 'mydb'            // Database filename (mydb.db)
 })
 ```
@@ -436,10 +444,11 @@ DeepBase supports custom JSON serialization in the JSON driver, allowing for cir
 
 ```javascript
 import { parse, stringify } from 'flatted';
-import DeepBase, { JsonDriver } from 'deepbase';
+import DeepBase from 'deepbase';
+import { JsonDriver } from 'deepbase-json';
 
 const db = new DeepBase(new JsonDriver({ 
-  path: './data',
+  path: '/var/lib/myapp/data',
   name: 'mydb',
   stringify, 
   parse 
@@ -457,10 +466,11 @@ await db.set('circular', obj);
 
 ```javascript
 const CircularJSON = require('circular-json');
-import DeepBase, { JsonDriver } from 'deepbase';
+import DeepBase from 'deepbase';
+import { JsonDriver } from 'deepbase-json';
 
 const db = new DeepBase(new JsonDriver({
-  path: './data',
+  path: '/var/lib/myapp/data',
   name: 'mydb',
   stringify: (obj) => CircularJSON.stringify(obj, null, 4),
   parse: CircularJSON.parse
@@ -478,7 +488,8 @@ You can create encrypted storage by extending DeepBase with custom serialization
 
 ```javascript
 import CryptoJS from 'crypto-js';
-import DeepBase, { JsonDriver } from 'deepbase';
+import DeepBase from 'deepbase';
+import { JsonDriver } from 'deepbase-json';
 
 class DeepbaseSecure extends DeepBase {
   constructor(opts) {
@@ -511,7 +522,7 @@ class DeepbaseSecure extends DeepBase {
 
 // Create an encrypted database
 const secureDB = new DeepbaseSecure({
-  path: './data',
+  path: '/var/lib/myapp/data',
   name: 'secure_db',
   encryptionKey: 'your-secret-key-here'
 });

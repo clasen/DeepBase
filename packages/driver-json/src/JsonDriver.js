@@ -18,9 +18,13 @@ export class JsonDriver extends DeepBaseDriver {
     ...opts
   } = {}) {
     super(opts);
+
+    if (typeof path !== 'string' || path.trim() === '' || !pathModule.isAbsolute(path)) {
+      throw new TypeError('JsonDriver requires an absolute "path" option.');
+    }
     
     this.name = name || "default";
-    this.path = path || pathModule.join(process.cwd(), 'db');
+    this.path = path;
     this.stringify = stringify || ((obj) => JSON.stringify(obj, null, 4));
     this.parse = parse || JSON.parse;
     this.multiProcess = multiProcess || false;
@@ -375,4 +379,3 @@ export class JsonDriver extends DeepBaseDriver {
 }
 
 export default JsonDriver;
-

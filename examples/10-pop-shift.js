@@ -1,6 +1,10 @@
 import { DeepBase } from 'deepbase';
+import { resolvePath } from 'deepbase/path';
 
-const db = new DeepBase({ name: 'pop-shift-demo' });
+const db = new DeepBase({
+  name: 'pop-shift-demo',
+  path: resolvePath(import.meta.url, './data'),
+});
 
 async function demo() {
   console.log('🚀 Testing pop() and shift() methods\n');
@@ -93,4 +97,3 @@ async function demo() {
 }
 
 demo().catch(console.error);
-

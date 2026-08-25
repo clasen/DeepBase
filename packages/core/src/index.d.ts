@@ -168,8 +168,12 @@ export interface SyncResult extends MigrateResult {
 }
 
 export class DeepBase {
-    constructor(drivers?: DeepBaseDriver | DeepBaseDriver[], options?: DeepBaseOptions);
-    constructor(jsonDriverOptions?: Record<string, any>);
+    constructor(drivers: DeepBaseDriver | DeepBaseDriver[], options?: DeepBaseOptions);
+    constructor(jsonDriverOptions: {
+        /** Required absolute storage directory for the implicit JSON driver. */
+        path: string;
+        [key: string]: any;
+    });
 
     drivers: DeepBaseDriver[];
     opts: DeepBaseOptions;

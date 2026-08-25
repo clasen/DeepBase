@@ -6,11 +6,14 @@
  */
 
 import DeepBase from 'deepbase';
+import { resolvePath } from 'deepbase/path';
 import { parse, stringify } from 'flatted';
+
+const dataPath = resolvePath(import.meta.url, './examples/data');
 
 // Create DeepBase with flatted serialization
 const db = new DeepBase({ 
-  path: './examples/data', 
+  path: dataPath,
   name: 'flatted-example',
   stringify,  // Use flatted's stringify instead of JSON.stringify
   parse       // Use flatted's parse instead of JSON.parse
@@ -133,4 +136,3 @@ console.log();
 
 await db.disconnect();
 console.log('✨ Example complete!');
-

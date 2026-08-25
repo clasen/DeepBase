@@ -31,21 +31,29 @@ DeepBase is a powerful database abstraction that orchestrates multiple storage d
 
 ```javascript
 import DeepBase from 'deepbase';
+import { resolvePath } from 'deepbase/path';
+
+const dataPath = resolvePath(import.meta.url, './data');
 
 // Backward-compatible syntax - uses JSON driver by default
-const db = new DeepBase({ path: './data', name: 'mydb' });
+const db = new DeepBase({ path: dataPath, name: 'mydb' });
 await db.connect();
 
 await db.set('users', 'alice', { name: 'Alice' });
 const alice = await db.get('users', 'alice');
 ```
 
+Filesystem drivers require an absolute `path`. `resolvePath()` anchors a
+relative path to your application module instead of `process.cwd()` or the
+installed package location.
+
 ### Explicit Driver Usage
 
 ```javascript
-import DeepBase, { JsonDriver } from 'deepbase';
+import DeepBase from 'deepbase';
+import { JsonDriver } from 'deepbase-json';
 
-const db = new DeepBase(new JsonDriver({ path: './data' }));
+const db = new DeepBase(new JsonDriver({ path: '/var/lib/myapp/data' }));
 await db.connect();
 
 await db.set('users', 'alice', { name: 'Alice' });
@@ -85,12 +93,13 @@ Optional: set `tableName` if you want a different table than `deepbase_main`.
 ### Multi-Driver Example
 
 ```javascript
-import DeepBase, { JsonDriver } from 'deepbase';
+import DeepBase from 'deepbase';
+import { JsonDriver } from 'deepbase-json';
 import MongoDriver from 'deepbase-mongodb';
 
 const db = new DeepBase([
   new MongoDriver({ url: 'mongodb://localhost:27017' }),
-  new JsonDriver({ path: './backup' })
+  new JsonDriver({ path: '/var/lib/myapp/backup' })
 ], {
   writeAll: true,           // Write to both drivers
   readFirst: true,          // Read from first available
@@ -105,15 +114,16 @@ await db.connect();
 Prevent operations from hanging indefinitely with configurable timeouts:
 
 ```javascript
-import DeepBase, { JsonDriver } from 'deepbase';
+import DeepBase from 'deepbase';
+import { JsonDriver } from 'deepbase-json';
 
 // Global timeout for all operations
-const db = new DeepBase(new JsonDriver(), {
+const db = new DeepBase(new JsonDriver({ path: '/var/lib/myapp/data' }), {
   timeout: 5000  // 5 seconds
 });
 
 // Different timeouts for reads and writes
-const db2 = new DeepBase(new JsonDriver(), {
+const db2 = new DeepBase(new JsonDriver({ path: '/var/lib/myapp/data' }), {
   readTimeout: 3000,   // 3 seconds for reads
   writeTimeout: 10000  // 10 seconds for writes
 });
@@ -167,7 +177,7 @@ const schema = {
   }
 };
 
-const db = new DeepBase(new JsonDriver({ name: 'app' }), { schema });
+const db = new DeepBase(new JsonDriver({ path: '/var/lib/myapp/data', name: 'app' }), { schema });
 await db.set('users', 'alice', { name: 'Alice', profile: { active: true } });
 await db.set('posts', 'hello', { title: 'Hello', authorId: 'alice' });
 
@@ -246,12 +256,13 @@ new DeepBase(drivers, options)
 **Returns:** `{ migrated, errors }` with counts of successful and failed items.
 
 ```javascript
-import DeepBase, { JsonDriver } from 'deepbase';
+import DeepBase from 'deepbase';
+import { JsonDriver } from 'deepbase-json';
 import SqliteDriver from 'deepbase-sqlite';
 
 const db = new DeepBase([
-  new SqliteDriver({ path: './data', name: 'mydb' }),  // index 0
-  new JsonDriver({ path: './backup', name: 'mydb' })   // index 1
+  new SqliteDriver({ path: '/var/lib/myapp/data', name: 'mydb' }),  // index 0
+  new JsonDriver({ path: '/var/lib/myapp/backup', name: 'mydb' })   // index 1
 ]);
 await db.connect();
 

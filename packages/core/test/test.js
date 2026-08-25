@@ -3,9 +3,27 @@ import { createRequire } from 'module';
 import { mkdtemp, rm } from 'fs/promises';
 import { tmpdir } from 'os';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import { DeepBase, DeepBaseDriver, DeepBaseSchemaError } from '../src/index.js';
+import { resolvePath } from '../src/path.js';
 
 const require = createRequire(import.meta.url);
+
+describe('resolvePath', function() {
+  it('resolves a path from the application module instead of process.cwd()', function() {
+    const expected = path.join(path.dirname(fileURLToPath(import.meta.url)), 'data');
+    assert.strictEqual(resolvePath(import.meta.url, './data'), expected);
+    assert.ok(path.isAbsolute(resolvePath(import.meta.url, './data')));
+
+    const commonjs = require('../src/path.cjs');
+    assert.strictEqual(commonjs.resolvePath(import.meta.url, './data'), expected);
+  });
+
+  it('rejects a missing module URL or path', function() {
+    assert.throws(() => resolvePath(undefined, './data'), /moduleUrl must be a file URL/);
+    assert.throws(() => resolvePath(import.meta.url, ''), /path must be a non-empty string/);
+  });
+});
 
 // Mock driver for testing
 class MockDriver extends DeepBaseDriver {
@@ -145,13 +163,24 @@ describe('DeepBase Core', function() {
       assert.strictEqual(db.drivers[1], driver2);
     });
 
-    it('should create JsonDriver for plain object (backward compatibility)', async function() {
-      // When a plain object is passed, it should create a JsonDriver with those options
+    it('should require path when a plain object creates the JSON driver', async function() {
+      const defaultDb = new DeepBase();
+      await assert.rejects(
+        defaultDb._initializeDrivers(),
+        /requires an absolute "path" option/,
+      );
+
       const db = new DeepBase({ name: 'test-db' });
-      // Drivers are initialized lazily, so we need to initialize them first
-      await db._initializeDrivers();
-      assert.strictEqual(db.drivers.length, 1);
-      assert.ok(db.drivers[0] instanceof DeepBaseDriver);
+      await assert.rejects(
+        db._initializeDrivers(),
+        /requires an absolute "path" option/,
+      );
+
+      const relativeDb = new DeepBase({ name: 'test-db', path: './data' });
+      await assert.rejects(
+        relativeDb._initializeDrivers(),
+        /requires an absolute "path" option/,
+      );
     });
 
     it('should set default options', function() {
@@ -580,22 +609,36 @@ describe('DeepBase Core', function() {
     });
 
     it('getSync lazy-connects when using JsonDriver (no connect needed)', async function() {
+      const directory = await mkdtemp(path.join(tmpdir(), 'deepbase-getsync-'));
       const { JsonDriver } = await import('deepbase-json');
-      const driver = new JsonDriver({ name: 'getSync-lazy-db' });
+      const driver = new JsonDriver({ name: 'getSync-lazy-db', path: directory });
       const db = new DeepBase(driver);
-      assert.strictEqual(db.getSync('key'), null);
-      assert.ok(driver._connected);
+
+      try {
+        assert.strictEqual(db.getSync('key'), null);
+        assert.ok(driver._connected);
+      } finally {
+        await db.dispose({ clearMemory: true, releaseInstance: true });
+        await rm(directory, { recursive: true });
+      }
     });
 
     it('returns value when using JsonDriver (sync-capable)', async function() {
+      const directory = await mkdtemp(path.join(tmpdir(), 'deepbase-getsync-'));
       const { JsonDriver } = await import('deepbase-json');
-      const driver = new JsonDriver({ name: 'getSync-json-test' });
+      const driver = new JsonDriver({ name: 'getSync-json-test', path: directory });
       const db = new DeepBase(driver);
-      await db.connect();
-      await db.set('key', 'value');
-      assert.strictEqual(db.getSync('key'), 'value');
-      await db.set('nested', 'a', 1);
-      assert.strictEqual(db.getSync('nested', 'a'), 1);
+
+      try {
+        await db.connect();
+        await db.set('key', 'value');
+        assert.strictEqual(db.getSync('key'), 'value');
+        await db.set('nested', 'a', 1);
+        assert.strictEqual(db.getSync('nested', 'a'), 1);
+      } finally {
+        await db.dispose({ clearMemory: true, releaseInstance: true });
+        await rm(directory, { recursive: true });
+      }
     });
   });
 

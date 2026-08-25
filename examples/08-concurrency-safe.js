@@ -6,8 +6,11 @@
  */
 
 import DeepBase from 'deepbase';
+import { resolvePath } from 'deepbase/path';
 import { JsonDriver } from 'deepbase-json';
 import { SqliteDriver } from 'deepbase-sqlite';
+
+const dataPath = resolvePath(import.meta.url, './data');
 
 async function demonstrateRaceConditionProtection() {
   console.log('╔══════════════════════════════════════════════════╗');
@@ -17,7 +20,7 @@ async function demonstrateRaceConditionProtection() {
   // Example 1: Concurrent Increments (Banking scenario)
   console.log('📊 Example 1: Bank Account with Concurrent Deposits\n');
   
-  const bankDB = new DeepBase(new JsonDriver({ name: 'bank', path: './data' }));
+  const bankDB = new DeepBase(new JsonDriver({ name: 'bank', path: dataPath }));
   await bankDB.connect();
   
   // Initialize account
@@ -41,7 +44,7 @@ async function demonstrateRaceConditionProtection() {
   console.log('📦 Example 2: Inventory with Concurrent Updates\n');
   
   const inventoryDB = new DeepBase(
-    new SqliteDriver({ name: 'inventory', path: './data' }),
+    new SqliteDriver({ name: 'inventory', path: dataPath }),
   );
   await inventoryDB.connect();
   
@@ -80,7 +83,7 @@ async function demonstrateRaceConditionProtection() {
   // Example 3: Concurrent Adds (Order Processing)
   console.log('🛒 Example 3: Order Queue with Concurrent Additions\n');
   
-  const ordersDB = new DeepBase(new JsonDriver({ name: 'orders', path: './data' }));
+  const ordersDB = new DeepBase(new JsonDriver({ name: 'orders', path: dataPath }));
   await ordersDB.connect();
   
   await ordersDB.set('orders', {});
@@ -122,4 +125,3 @@ demonstrateRaceConditionProtection().catch(error => {
   console.error('Error:', error);
   process.exit(1);
 });
-

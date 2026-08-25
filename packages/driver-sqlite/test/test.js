@@ -11,6 +11,19 @@ const testDataPath = path.join(__dirname, 'test-data');
 
 const PRAGMA_MODES = ['none', 'safe', 'balanced', 'fast'];
 
+describe('SqliteDriver configuration', function () {
+  it('should require an absolute storage path', function () {
+    assert.throws(
+      () => new SqliteDriver({ name: 'missing-path' }),
+      /requires an absolute "path" option/,
+    );
+    assert.throws(
+      () => new SqliteDriver({ name: 'relative-path', path: './data' }),
+      /requires an absolute "path" option/,
+    );
+  });
+});
+
 for (const pragma of PRAGMA_MODES) {
   describe(`SqliteDriver [pragma=${pragma}]`, function () {
     let db;
