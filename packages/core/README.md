@@ -378,43 +378,65 @@ class MyDriver extends DeepBaseDriver {
 
 `DeepBase.first()` / `DeepBase.last()` delegate to each driver's `first()` / `last()` and follow the same read policy as `get()` (`readFirst` order or `Promise.any` mode). `shift()` / `pop()` use these methods, and drivers without overrides still work through the base fallback to `keys()`.
 
-## 🔐 Extending DeepBase with Encryption
+## 🔒 Secure Storage with Encryption
 
-DeepBase supports custom `stringify`/`parse` functions in its `JsonDriver`, making it easy to add transparent AES encryption:
+Use the built-in plugin to encrypt every value with AES-256-GCM before it
+reaches the driver. With `JsonDriver`, values stay encrypted both on disk and
+in its internal memory cache; no custom serialization or memory hooks are needed.
 
 ```javascript
-import CryptoJS from 'crypto-js';
 import DeepBase from 'deepbase';
+import { encryptedValues } from 'deepbase/plugins/encryption';
 import { JsonDriver } from 'deepbase-json';
 
-class DeepbaseSecure extends DeepBase {
-    constructor(opts) {
-        const encryptionKey = opts.encryptionKey;
-        delete opts.encryptionKey;
-
-        const driver = new JsonDriver({
-            ...opts,
-            stringify: (obj) => {
-                const iv = CryptoJS.lib.WordArray.random(128 / 8);
-                const encrypted = CryptoJS.AES.encrypt(JSON.stringify(obj), encryptionKey, { iv });
-                return iv.toString(CryptoJS.enc.Hex) + ':' + encrypted.toString();
-            },
-            parse: (encryptedData) => {
-                const [ivHex, encrypted] = encryptedData.split(':');
-                const iv = CryptoJS.enc.Hex.parse(ivHex);
-                const bytes = CryptoJS.AES.decrypt(encrypted, encryptionKey, { iv });
-                return JSON.parse(bytes.toString(CryptoJS.enc.Utf8));
-            }
-        });
-
-        super(driver);
-    }
+const encodedKey = process.env.DEEPBASE_ENCRYPTION_KEY;
+if (!encodedKey) {
+  throw new Error('DEEPBASE_ENCRYPTION_KEY is required');
 }
 
-const db = new DeepbaseSecure({ name: 'secrets', encryptionKey: 'my-key-123' });
-await db.set('token', 'sk-super-secret');
-console.log(await db.get('token')); // 'sk-super-secret' (file on disk is encrypted)
+const encryptionKey = Buffer.from(encodedKey, 'base64');
+const encryption = encryptedValues({
+  activeKeyId: 'primary',
+  keys: { primary: encryptionKey }
+});
+
+const driver = new JsonDriver({
+  path: '/var/lib/myapp/data',
+  name: 'secure_db'
+});
+const secureDB = new DeepBase(driver).use(encryption);
+
+try {
+  await secureDB.set('config', {
+    service: 'my-app',
+    accessToken: 'example-token',
+    retries: 0
+  });
+
+  await secureDB.inc('config', 'retries', 1);
+  const config = await secureDB.get('config'); // Decrypted for the application
+} finally {
+  await secureDB.dispose({ clearMemory: true, releaseInstance: true });
+  encryptionKey.fill(0);
+}
 ```
+
+Provide a base64-encoded, randomly generated 32-byte key through your
+application's secret manager or environment. The application reads it explicitly;
+the plugin requires a 32-byte `Buffer` or `Uint8Array` and never supplies a
+default key. Keep the key available under the same `keyId` to reopen the database.
+
+Object keys, array lengths, and empty containers remain visible. Plaintext
+exists while your application supplies or reads values, including inside
+`upd()` callbacks; the plugin does not cache decrypted values. Disposal clears
+the JSON driver's cache and the plugin's internal key copies.
+
+Authentication failures, malformed envelopes, and unknown key IDs throw.
+Existing plaintext data is encrypted when rewritten through the plugin;
+registering it does not migrate existing data automatically.
+
+See the [encryption plugin documentation](docs/plugins/encryption.md)
+for additional keys and key rotation.
 
 ## License
 
