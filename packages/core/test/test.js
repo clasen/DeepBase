@@ -115,6 +115,18 @@ class MockDriver extends DeepBaseDriver {
   }
 }
 
+class SyncMockDriver extends MockDriver {
+  getSync(...args) {
+    if (args.length === 0) return { ...this.data };
+    let current = this.data;
+    for (const key of args) {
+      if (!current || typeof current !== 'object') return null;
+      current = current[key];
+    }
+    return current === undefined ? null : current;
+  }
+}
+
 const relationalSchema = {
   entities: {
     users: {
@@ -639,6 +651,151 @@ describe('DeepBase Core', function() {
         await db.dispose({ clearMemory: true, releaseInstance: true });
         await rm(directory, { recursive: true });
       }
+    });
+  });
+
+  describe('Instance Plugins', function() {
+    it('runs middleware in registration order and transforms a write once before fan-out', async function() {
+      const events = [];
+      let transforms = 0;
+      const first = {
+        name: 'first',
+        async execute(context, next) {
+          events.push(`first:before:${context.operation}`);
+          const result = await next();
+          events.push(`first:after:${context.operation}`);
+          return result;
+        },
+      };
+      const second = {
+        name: 'second',
+        async execute(context, next) {
+          events.push(`second:before:${context.operation}`);
+          let override;
+          if (context.operation === 'set') {
+            transforms++;
+            override = { args: [...context.args.slice(0, -1), `${context.args.at(-1)}!`] };
+          }
+          const result = await next(override);
+          events.push(`second:after:${context.operation}`);
+          return result;
+        },
+      };
+      const primary = new MockDriver({ name: 'primary' });
+      const secondary = new MockDriver({ name: 'secondary' });
+      const db = new DeepBase([primary, secondary]).use(first).use(second);
+
+      await db.set('message', 'hello');
+
+      assert.strictEqual(transforms, 1);
+      assert.strictEqual(primary.data.message, 'hello!');
+      assert.strictEqual(secondary.data.message, 'hello!');
+      assert.deepStrictEqual(events, [
+        'first:before:set',
+        'second:before:set',
+        'second:after:set',
+        'first:after:set',
+      ]);
+    });
+
+    it('supports short-circuiting and operation replacement', async function() {
+      const driver = new MockDriver();
+      const db = new DeepBase(driver).use({
+        name: 'policy',
+        async execute(context, next) {
+          if (context.operation === 'get' && context.args[0] === 'virtual') return 'plugin-value';
+          if (context.operation === 'inc') {
+            const amount = context.args.at(-1);
+            return next({
+              operation: 'upd',
+              args: [...context.args.slice(0, -1), (value) => (value || 0) + amount],
+            });
+          }
+          return next();
+        },
+      });
+
+      await db.set('counter', 1);
+      await db.inc('counter', 2);
+      assert.strictEqual(await db.get('counter'), 3);
+      assert.strictEqual(await db.get('virtual'), 'plugin-value');
+      assert.strictEqual(driver.data.virtual, undefined);
+    });
+
+    it('rejects invalid, duplicate and late registrations', async function() {
+      const db = new DeepBase(new MockDriver());
+      assert.throws(() => db.use(null), /must be an object/);
+      assert.throws(() => db.use({ name: '' }), /non-empty name/);
+      assert.throws(() => db.use({ name: 'empty' }), /at least one hook/);
+      assert.throws(() => db.use({ name: 'bad', execute: true }), /execute must be a function/);
+
+      const plugin = { name: 'valid', execute: (context, next) => next() };
+      assert.strictEqual(db.use(plugin), db);
+      assert.throws(() => db.use(plugin), /already registered/);
+      await db.get('anything');
+      assert.throws(
+        () => db.use({ name: 'late', execute: (context, next) => next() }),
+        /before the first operation/,
+      );
+    });
+
+    it('rejects asynchronous setup and multiple next calls', async function() {
+      const setupDb = new DeepBase(new MockDriver());
+      assert.throws(
+        () => setupDb.use({ name: 'async-setup', setup: async () => {} }),
+        /setup\(\) must be synchronous/,
+      );
+
+      const db = new DeepBase(new MockDriver()).use({
+        name: 'double-next',
+        async execute(context, next) {
+          await next();
+          return next();
+        },
+      });
+      await assert.rejects(db.get('anything'), /called next\(\) more than once/);
+    });
+
+    it('uses executeSync or reports the async-only plugin', async function() {
+      const syncDriver = new SyncMockDriver();
+      const syncDb = new DeepBase(syncDriver).use({
+        name: 'sync-transform',
+        execute: (context, next) => next(),
+        executeSync(context, next) {
+          const result = next();
+          return typeof result === 'string' ? result.toUpperCase() : result;
+        },
+      });
+      await syncDb.set('message', 'hello');
+      assert.strictEqual(syncDb.getSync('message'), 'HELLO');
+
+      const syncOnlyDriver = new SyncMockDriver();
+      syncOnlyDriver.data.message = 'sync only';
+      const syncOnlyDb = new DeepBase(syncOnlyDriver).use({
+        name: 'sync-only',
+        executeSync(context, next) {
+          return `${next()}!`;
+        },
+      });
+      assert.strictEqual(syncOnlyDb.getSync('message'), 'sync only!');
+
+      const asyncOnlyDb = new DeepBase(new SyncMockDriver()).use({
+        name: 'async-only',
+        execute: (context, next) => next(),
+      });
+      assert.throws(() => asyncOnlyDb.getSync('message'), /async-only does not support getSync/);
+    });
+
+    it('disposes plugins in reverse registration order after drivers', async function() {
+      const events = [];
+      const driver = new MockDriver();
+      driver.dispose = async () => events.push('driver');
+      const db = new DeepBase(driver)
+        .use({ name: 'first', setup() {}, dispose: async () => events.push('first') })
+        .use({ name: 'second', setup() {}, dispose: async () => events.push('second') });
+
+      await db.dispose();
+      assert.deepStrictEqual(events, ['driver', 'second', 'first']);
     });
   });
 

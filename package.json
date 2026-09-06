@@ -1,6 +1,6 @@
 {
   "name": "deepbase-monorepo",
-  "version": "3.9.0",
+  "version": "3.10.0",
   "description": "DeepBase - Multi-driver persistence system monorepo",
   "private": true,
   "type": "module",
@@ -10,6 +10,8 @@
   "scripts": {
     "test": "npm test -w deepbase && npm test -w deepbase-json && npm test -w deepbase-mongodb && npm test -w deepbase-redis && npm test -w deepbase-redis-json && npm test -w deepbase-sqlite && npm test -w deepbase-drizzle",
     "test:core": "npm test -w deepbase",
+    "test:encryption": "npm exec -w deepbase -- mocha test/encryption.js",
+    "test:links": "npm exec -w deepbase -- mocha test/links.js",
     "test:json": "npm test -w deepbase-json",
     "test:mongodb": "npm test -w deepbase-mongodb",
     "test:redis": "npm test -w deepbase-redis",

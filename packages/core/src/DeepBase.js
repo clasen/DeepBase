@@ -75,6 +75,8 @@ export class DeepBase {
     this._driversInitialized = false;
     
     this.drivers = drivers;
+    this._plugins = [];
+    this._pluginsLocked = false;
     this._schema = schema === undefined ? null : compileSchema(schema);
     this.schema = this._schema ? cloneData(this._schema.publicSchema) : null;
     if (this._schema) this._schemaMutationQueue = Promise.resolve();
@@ -91,8 +93,129 @@ export class DeepBase {
       ...opts
     };
   }
+
+  use(plugin) {
+    if (this._pluginsLocked) {
+      throw new Error('DeepBase plugins must be registered before the first operation');
+    }
+    if (!plugin || typeof plugin !== 'object') {
+      throw new TypeError('DeepBase plugin must be an object');
+    }
+    if (typeof plugin.name !== 'string' || plugin.name.trim() === '') {
+      throw new TypeError('DeepBase plugin requires a non-empty name');
+    }
+
+    const hooks = ['setup', 'execute', 'executeSync', 'dispose'];
+    for (const hook of hooks) {
+      if (plugin[hook] !== undefined && typeof plugin[hook] !== 'function') {
+        throw new TypeError(`DeepBase plugin ${plugin.name} ${hook} must be a function`);
+      }
+    }
+    if (!hooks.some((hook) => typeof plugin[hook] === 'function')) {
+      throw new TypeError(`DeepBase plugin ${plugin.name} must define at least one hook`);
+    }
+    if (this._plugins.some((registered) => registered.name === plugin.name)) {
+      throw new Error(`DeepBase plugin ${plugin.name} is already registered`);
+    }
+
+    if (plugin.setup) {
+      const result = plugin.setup(this);
+      if (result && typeof result.then === 'function') {
+        Promise.resolve(result).catch(() => {});
+        throw new TypeError(`DeepBase plugin ${plugin.name} setup() must be synchronous`);
+      }
+    }
+
+    this._plugins.push(plugin);
+    return this;
+  }
+
+  _nextPluginContext(context, override) {
+    if (override === undefined) return context;
+    if (!override || typeof override !== 'object' || Array.isArray(override)) {
+      throw new TypeError('DeepBase plugin next() override must be an object');
+    }
+
+    const operation = override.operation ?? context.operation;
+    const args = override.args ?? context.args;
+    if (typeof operation !== 'string' || operation.length === 0) {
+      throw new TypeError('DeepBase plugin operation must be a non-empty string');
+    }
+    if (!Array.isArray(args)) {
+      throw new TypeError('DeepBase plugin args must be an array');
+    }
+
+    return Object.freeze({ ...context, operation, args });
+  }
+
+  _executePlugins(operation, kind, args, terminal) {
+    const initialContext = Object.freeze({
+      db: this,
+      operation,
+      kind,
+      args,
+      sync: false,
+    });
+
+    const dispatch = (index, context) => {
+      let pluginIndex = index;
+      while (pluginIndex < this._plugins.length && !this._plugins[pluginIndex].execute) {
+        pluginIndex++;
+      }
+      if (pluginIndex === this._plugins.length) return terminal(context);
+
+      const plugin = this._plugins[pluginIndex];
+      let called = false;
+      const next = (override) => {
+        if (called) throw new Error(`DeepBase plugin ${plugin.name} called next() more than once`);
+        called = true;
+        return dispatch(pluginIndex + 1, this._nextPluginContext(context, override));
+      };
+      return plugin.execute(context, next);
+    };
+
+    return dispatch(0, initialContext);
+  }
+
+  _executePluginsSync(operation, kind, args, terminal) {
+    const initialContext = Object.freeze({
+      db: this,
+      operation,
+      kind,
+      args,
+      sync: true,
+    });
+
+    const dispatch = (index, context) => {
+      let pluginIndex = index;
+      while (
+        pluginIndex < this._plugins.length
+        && !this._plugins[pluginIndex].execute
+        && !this._plugins[pluginIndex].executeSync
+      ) {
+        pluginIndex++;
+      }
+      if (pluginIndex === this._plugins.length) return terminal(context);
+
+      const plugin = this._plugins[pluginIndex];
+      if (!plugin.executeSync) {
+        throw new Error(`DeepBase plugin ${plugin.name} does not support getSync()`);
+      }
+
+      let called = false;
+      const next = (override) => {
+        if (called) throw new Error(`DeepBase plugin ${plugin.name} called next() more than once`);
+        called = true;
+        return dispatch(pluginIndex + 1, this._nextPluginContext(context, override));
+      };
+      return plugin.executeSync(context, next);
+    };
+
+    return dispatch(0, initialContext);
+  }
   
   async _initializeDrivers() {
+    this._pluginsLocked = true;
     if (this._driversInitialized) {
       return;
     }
@@ -165,18 +288,33 @@ export class DeepBase {
   }
   
   async disconnect() {
+    this._pluginsLocked = true;
     await Promise.allSettled(
       this.drivers.map(driver => driver.disconnect())
     );
   }
 
   async dispose(options = {}) {
-    await Promise.all(
+    this._pluginsLocked = true;
+    const driverResults = await Promise.allSettled(
       this.drivers.map(driver => driver.dispose(options))
     );
+    const pluginResults = [];
+    for (const plugin of [...this._plugins].reverse()) {
+      if (!plugin.dispose) continue;
+      try {
+        await plugin.dispose(this);
+        pluginResults.push({ status: 'fulfilled' });
+      } catch (reason) {
+        pluginResults.push({ status: 'rejected', reason });
+      }
+    }
+
+    const failure = [...driverResults, ...pluginResults].find((result) => result.status === 'rejected');
+    if (failure) throw failure.reason;
   }
 
-  async _readFromDrivers(method, args) {
+  async _readFromDriversRaw(method, args) {
     if (this.opts.readFirst) {
       // Try drivers in order until one succeeds
       for (const driver of this.drivers) {
@@ -198,7 +336,12 @@ export class DeepBase {
     }
   }
 
-  async _writeToDrivers(method, args) {
+  async _readFromDrivers(method, args) {
+    return this._executePlugins(method, 'read', args, (context) =>
+      this._readFromDriversRaw(context.operation, context.args));
+  }
+
+  async _writeToDriversRaw(method, args) {
     if (this.opts.writeAll) {
       // Write to all drivers
       const results = await Promise.allSettled(
@@ -216,6 +359,11 @@ export class DeepBase {
       // Write only to primary driver
       return this.drivers[0][method](...args);
     }
+  }
+
+  async _writeToDrivers(method, args) {
+    return this._executePlugins(method, 'write', args, (context) =>
+      this._writeToDriversRaw(context.operation, context.args));
   }
 
   async _runReadOperation(operationName, driverMethod, args) {
@@ -262,10 +410,16 @@ export class DeepBase {
   }
 
   getSync(...args) {
+    this._pluginsLocked = true;
     if (!this.drivers || this.drivers.length === 0) {
       throw new Error('No drivers. Call connect() first or add drivers.');
     }
-    return this.drivers[0].getSync(...args);
+    return this._executePluginsSync('get', 'read', args, (context) => {
+      if (context.operation !== 'get') {
+        throw new Error(`getSync() cannot execute ${context.operation}`);
+      }
+      return this.drivers[0].getSync(...context.args);
+    });
   }
   
   async set(...args) {

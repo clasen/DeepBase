@@ -9,6 +9,32 @@ export interface DisposeOptions {
     releaseInstance?: boolean;
 }
 
+export type DeepBasePluginKind = 'read' | 'write';
+
+export interface DeepBasePluginContext {
+    readonly db: DeepBase;
+    readonly operation: string;
+    readonly kind: DeepBasePluginKind;
+    readonly args: any[];
+    readonly sync: boolean;
+}
+
+export interface DeepBasePluginNextOptions {
+    operation?: string;
+    args?: any[];
+}
+
+export type DeepBasePluginNext = (options?: DeepBasePluginNextOptions) => Promise<any>;
+export type DeepBasePluginNextSync = (options?: DeepBasePluginNextOptions) => any;
+
+export interface DeepBasePlugin {
+    name: string;
+    setup?(db: DeepBase): void;
+    execute?(context: DeepBasePluginContext, next: DeepBasePluginNext): any | Promise<any>;
+    executeSync?(context: DeepBasePluginContext, next: DeepBasePluginNextSync): any;
+    dispose?(db: DeepBase): void | Promise<void>;
+}
+
 export type DeepBaseSchemaType = 'array' | 'boolean' | 'null' | 'number' | 'object' | 'string';
 export type DeepBasePathSegment = string | number;
 
@@ -178,6 +204,8 @@ export class DeepBase {
     drivers: DeepBaseDriver[];
     opts: DeepBaseOptions;
     schema: DeepBaseSchemaDefinition | null;
+
+    use(plugin: DeepBasePlugin): this;
 
     connect(): Promise<ConnectResult>;
     disconnect(): Promise<void>;

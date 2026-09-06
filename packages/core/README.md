@@ -109,6 +109,49 @@ const db = new DeepBase([
 await db.connect();
 ```
 
+## Instance Plugins
+
+Register per-instance plugins before `connect()` or the first operation:
+
+```javascript
+const plugin = {
+  name: 'uppercase-reads',
+  async execute(context, next) {
+    const value = await next();
+    return context.operation === 'get' && typeof value === 'string'
+      ? value.toUpperCase()
+      : value;
+  },
+  executeSync(context, next) {
+    const value = next();
+    return context.operation === 'get' && typeof value === 'string'
+      ? value.toUpperCase()
+      : value;
+  }
+};
+
+const db = new DeepBase(driver).use(plugin);
+```
+
+`execute(context, next)` middleware runs in registration order. It may call
+`next()` once, pass `{ operation, args }` overrides, or return without calling
+`next()` to short-circuit the operation. Optional `setup(db)` is synchronous;
+optional `dispose(db)` runs in reverse registration order after drivers are
+disposed. Async middleware must implement `executeSync` for `getSync()`.
+
+Schema reads and writes use the plugin pipeline. `migrate()`, `syncAll()`, and
+direct `getDriver()` access remain raw so stored representations can be copied
+without transformation.
+
+Built-in plugins, included in the `deepbase` package:
+
+- [`deepbase/plugins/encryption`](docs/plugins/encryption.md) encrypts all values automatically (Node.js).
+- [`deepbase/plugins/links`](docs/plugins/links.md) resolves explicit path links (portable).
+
+Import each plugin from its own entry point and register it with `.use()`.
+Both entry points support ESM, CommonJS, and TypeScript. Importing the core or
+links does not load the encryption plugin.
+
 ## Timeout Configuration
 
 Prevent operations from hanging indefinitely with configurable timeouts:

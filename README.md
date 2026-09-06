@@ -19,7 +19,7 @@ DeepBase is a powerful, flexible database abstraction that lets you use multiple
 
 DeepBase v3.0 is split into modular packages:
 
-- **`deepbase`** - Core library (includes `deepbase-json` as dependency)
+- **`deepbase`** - Core library with encryption and links plugins (includes `deepbase-json` as dependency)
 - **`deepbase-json`** - JSON filesystem driver (no external DB dependencies!)
 - **`deepbase-sqlite`** - SQLite driver (embedded database, ACID compliant)
 - **`deepbase-mongodb`** - MongoDB driver
@@ -86,6 +86,80 @@ await db.set('config', 'version', '1.0.0');
 // Reads from MongoDB (or JSON if MongoDB is down)
 const version = await db.get('config', 'version');
 ```
+
+## 🔌 Instance Plugins
+
+Register plugins with `use()` before connecting or running the first operation.
+Plugins wrap logical driver reads and writes in registration order and can
+transform arguments, results, or the operation itself:
+
+```javascript
+const uppercaseReads = {
+  name: 'uppercase-reads',
+  async execute(context, next) {
+    const result = await next();
+    return context.operation === 'get' && typeof result === 'string'
+      ? result.toUpperCase()
+      : result;
+  }
+};
+
+const db = new DeepBase(driver).use(uppercaseReads);
+```
+
+An async middleware plugin must provide `executeSync(context, next)` if the
+application calls `getSync()`. `migrate()`, `syncAll()`, and direct access
+through `getDriver()` intentionally operate on raw stored values.
+
+### Value encryption
+
+The built-in encryption plugin automatically encrypts every leaf while preserving the surrounding
+object, array, and key structure:
+
+```javascript
+import { encryptedValues } from 'deepbase/plugins/encryption';
+
+const encryption = encryptedValues({
+  activeKeyId: '2026-09',
+  keys: {
+    '2026-09': activeKey,
+    '2026-06': previousKey
+  }
+});
+
+const db = new DeepBase(driver).use(encryption);
+```
+
+Keys must be 32-byte `Buffer` or `Uint8Array` values. No path selectors are
+required; all values written through the plugin are authenticated
+with AES-256-GCM and carry their `keyId`; rewriting them uses the active key.
+This is value encryption inspired by SOPS, not compatibility with the SOPS
+file format or CLI.
+
+Included in `deepbase`; no separate plugin installation is needed. This entry
+point uses `node:crypto` and requires Node.js. Importing `deepbase` or
+`deepbase/plugins/links` does not load the encryption plugin.
+See the [encryption documentation](packages/core/docs/plugins/encryption.md).
+
+### Linked paths
+
+The built-in links plugin stores links as versioned strings and resolves them only when
+requested:
+
+```javascript
+import { linkedData } from 'deepbase/plugins/links';
+
+const links = linkedData({ maxDepth: 32 });
+const db = new DeepBase(driver).use(links);
+
+await db.set('nodes', 'root', { label: 'Root' });
+await db.set('aliases', 'home', links.to('nodes', 'root'));
+
+const node = await links.resolve('aliases', 'home');
+```
+
+Resolution reports missing targets, cycles, and depth exhaustion. Links may be
+dangling and do not replace strict relational `schema.ref` fields.
 
 ## 🔥 Core Features
 
@@ -276,6 +350,7 @@ new DeepBase(drivers, options)
 
 ### Core Methods
 
+- `db.use(plugin)` - Register an instance plugin before the first operation
 - `await db.connect()` - Connect all drivers
 - `await db.disconnect()` - Disconnect all drivers
 - `await db.dispose({ clearMemory, releaseInstance })` - Wait for pending writes, disconnect, clear memory, and release singleton instances
@@ -527,170 +602,65 @@ await db.set("a", "b", { circular: {} });
 await db.set("a", "b", "circular", "self", await db.get("a", "b"));
 ```
 
-## 🔐 Protecting Sensitive Fields in Memory
-
-The JSON driver can transform defensive copies exactly when values enter or
-leave its internal cache. This reduces the time sensitive values remain as
-plaintext in the driver's long-lived cache while keeping non-sensitive paths
-queryable. The complete encrypted database example below shows these hooks
-with real authenticated encryption:
-
-```javascript
-const secrets = new Set(['privateKey', 'mnemonic']);
-const transform = (value, path, secretFn) => {
-  if (secrets.has(path.at(-1))) return secretFn(value);
-  if (Array.isArray(value)) return value.map((v, i) => transform(v, [...path, String(i)], secretFn));
-  if (value && typeof value === 'object') return Object.fromEntries(
-    Object.entries(value).map(([k, v]) => [k, transform(v, [...path, k], secretFn)])
-  );
-  return value;
-};
-
-const db = new DeepBase(new JsonDriver({
-  encodeForMemory: (value, path) => transform(value, path, seal),
-  decodeFromMemory: (value, path) => transform(value, path, unseal)
-}));
-
-await db.dispose({ clearMemory: true, releaseInstance: true });
-```
-
-Throw from either hook on encryption/authentication failure; DeepBase does not
-fall back to the untransformed cached value. These hooks protect the internal
-cache, not every temporary plaintext value in the JavaScript process.
-
 ## 🔒 Secure Storage with Encryption
 
-Use Node.js authenticated encryption to protect the complete database on disk,
-and the memory hooks to keep selected fields encrypted in the JSON driver's
-internal cache:
+Use the built-in plugin to encrypt every value with AES-256-GCM before it
+reaches the driver. With `JsonDriver`, values stay encrypted both on disk and
+in its internal memory cache; no custom serialization or memory hooks are needed.
 
 ```javascript
-import crypto from 'node:crypto';
 import DeepBase from 'deepbase';
+import { encryptedValues } from 'deepbase/plugins/encryption';
 import { JsonDriver } from 'deepbase-json';
 
-const encryptionKey = Buffer.from(
-  process.env.DEEPBASE_ENCRYPTION_KEY ?? '',
-  'base64'
-);
-
-if (encryptionKey.length !== 32) {
-  throw new Error('DEEPBASE_ENCRYPTION_KEY must be a base64-encoded 32-byte key');
+const encodedKey = process.env.DEEPBASE_ENCRYPTION_KEY;
+if (!encodedKey) {
+  throw new Error('DEEPBASE_ENCRYPTION_KEY is required');
 }
 
-// AES-GCM encrypts and authenticates each value with a fresh 96-bit IV.
-const encryptValue = (value) => {
-  const iv = crypto.randomBytes(12);
-  const cipher = crypto.createCipheriv('aes-256-gcm', encryptionKey, iv);
-  const ciphertext = Buffer.concat([
-    cipher.update(JSON.stringify(value), 'utf8'),
-    cipher.final()
-  ]);
-
-  return {
-    version: 1,
-    iv: iv.toString('base64'),
-    tag: cipher.getAuthTag().toString('base64'),
-    data: ciphertext.toString('base64')
-  };
-};
-
-const decryptValue = (payload) => {
-  if (
-    !payload || payload.version !== 1 ||
-    typeof payload.iv !== 'string' ||
-    typeof payload.tag !== 'string' ||
-    typeof payload.data !== 'string'
-  ) {
-    throw new Error('Invalid encrypted payload');
-  }
-
-  const iv = Buffer.from(payload.iv, 'base64');
-  const tag = Buffer.from(payload.tag, 'base64');
-  if (iv.length !== 12 || tag.length !== 16) {
-    throw new Error('Invalid encrypted payload');
-  }
-
-  const decipher = crypto.createDecipheriv(
-    'aes-256-gcm',
-    encryptionKey,
-    iv,
-    { authTagLength: 16 }
-  );
-  decipher.setAuthTag(tag);
-
-  const plaintext = Buffer.concat([
-    decipher.update(Buffer.from(payload.data, 'base64')),
-    decipher.final()
-  ]);
-
-  return JSON.parse(plaintext.toString('utf8'));
-};
-
-const sensitiveFields = new Set([
-  'password',
-  'privateKey',
-  'mnemonic',
-  'accessToken'
-]);
-
-const seal = (value) => ({ encrypted: encryptValue(value) });
-const unseal = (value) => {
-  if (!value || typeof value !== 'object' || !value.encrypted) {
-    throw new Error('Invalid encrypted memory value');
-  }
-  return decryptValue(value.encrypted);
-};
-
-const transformSensitive = (value, path, transform) => {
-  if (sensitiveFields.has(path.at(-1))) return transform(value);
-  if (Array.isArray(value)) {
-    return value.map((item, index) =>
-      transformSensitive(item, [...path, String(index)], transform)
-    );
-  }
-  if (value !== null && typeof value === 'object') {
-    return Object.fromEntries(
-      Object.entries(value).map(([key, item]) => [
-        key,
-        transformSensitive(item, [...path, key], transform)
-      ])
-    );
-  }
-  return value;
-};
+const encryptionKey = Buffer.from(encodedKey, 'base64');
+const encryption = encryptedValues({
+  activeKeyId: 'primary',
+  keys: { primary: encryptionKey }
+});
 
 const driver = new JsonDriver({
   path: '/var/lib/myapp/data',
-  name: 'secure_db',
-  // Encrypt the complete serialized database on disk.
-  stringify: (value) => JSON.stringify(encryptValue(value)),
-  parse: (text) => decryptValue(JSON.parse(text)),
-  // Encrypt only selected fields inside the driver's memory cache.
-  encodeForMemory: (value, path) =>
-    transformSensitive(value, path, seal),
-  decodeFromMemory: (value, path) =>
-    transformSensitive(value, path, unseal)
+  name: 'secure_db'
 });
+const secureDB = new DeepBase(driver).use(encryption);
 
-const secureDB = new DeepBase(driver);
-await secureDB.connect();
+try {
+  await secureDB.set('config', {
+    service: 'my-app',
+    accessToken: 'example-token',
+    retries: 0
+  });
 
-// Use it like a regular DeepBase instance
-await secureDB.set("users", "admin", { password: "secret123" });
-const admin = await secureDB.get("users", "admin");
-console.log(admin); // { password: 'secret123' }
-
-// Clear the driver's long-lived cache when this instance is no longer needed.
-await secureDB.dispose({ clearMemory: true, releaseInstance: true });
+  await secureDB.inc('config', 'retries', 1);
+  const config = await secureDB.get('config'); // Decrypted for the application
+} finally {
+  await secureDB.dispose({ clearMemory: true, releaseInstance: true });
+  encryptionKey.fill(0);
+}
 ```
 
-Generate the key once with
-`node -e "console.log(require('node:crypto').randomBytes(32).toString('base64'))"`
-and store it in a secret manager or environment variable. Reuse the same key to
-reopen the database; losing it makes the data unrecoverable. A changed file,
-wrong key, or invalid memory value causes decryption to throw instead of
-returning unauthenticated data.
+Provide a base64-encoded, randomly generated 32-byte key through your
+application's secret manager or environment. The application reads it explicitly;
+the plugin requires a 32-byte `Buffer` or `Uint8Array` and never supplies a
+default key. Keep the key available under the same `keyId` to reopen the database.
+
+Object keys, array lengths, and empty containers remain visible. Plaintext
+exists while your application supplies or reads values, including inside
+`upd()` callbacks; the plugin does not cache decrypted values. Disposal clears
+the JSON driver's cache and the plugin's internal key copies.
+
+Authentication failures, malformed envelopes, and unknown key IDs throw.
+Existing plaintext data is encrypted when rewritten through the plugin;
+registering it does not migrate existing data automatically.
+
+See the [encryption plugin documentation](packages/core/docs/plugins/encryption.md)
+for additional keys and key rotation.
 
 ## 🛠️ Creating Custom Drivers
 
