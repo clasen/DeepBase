@@ -60,6 +60,12 @@ cd packages/driver-json
 npm test
 ```
 
+The IndexedDB driver has no Node test runner: its suite is a browser page.
+Serve the repository over HTTP (`python3 -m http.server 8791`) and open
+`http://127.0.0.1:8791/packages/driver-indexeddb/test/test.html`, or run it
+headless with `node packages/driver-indexeddb/test/run-headless.js` (needs a
+local Chrome/Chromium, no npm dependency).
+
 ## Test Coverage
 
 Total: **99 tests** across all packages
@@ -401,4 +407,3 @@ npm test
 Time: ~431ms total
 
 For questions or issues with tests, please open an issue on GitHub.
-

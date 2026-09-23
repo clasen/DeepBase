@@ -29,6 +29,18 @@ export class DeepBaseDriver {
   getSync(...args) {
     throw new Error('getSync() is not implemented by this driver');
   }
+
+  /**
+   * Run a query descriptor over the object stored at path.
+   * Drivers read the value from their own storage and delegate the evaluation
+   * to evaluateQuery() from deepbase.
+   * @param {Array<string|number>} path - Path to the queried object
+   * @param {object[]} steps - Query descriptor steps
+   * @returns {Promise<Array<{id: string, value: any}>>} Matching records
+   */
+  async query(path, steps) {
+    throw new Error(`query() is not supported by ${this.constructor.name || 'this driver'}`);
+  }
   
   async set(...args) {
     throw new Error('set() must be implemented by driver');
@@ -154,4 +166,3 @@ export class DeepBaseDriver {
     return parts;
   }
 }
-

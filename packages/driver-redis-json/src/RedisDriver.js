@@ -1,4 +1,4 @@
-import { DeepBaseDriver } from 'deepbase';
+import { DeepBaseDriver, evaluateQuery, removeKey } from 'deepbase';
 import { createClient } from 'redis';
 
 export class RedisDriver extends DeepBaseDriver {
@@ -69,6 +69,18 @@ export class RedisDriver extends DeepBaseDriver {
       return null;
     }
   }
+
+  /**
+   * Run a query descriptor over the object stored at ...path.
+   * The value is read from RedisJSON and evaluated in memory; filters are not
+   * pushed to the server and no indexes are used.
+   * @param {Array<string|number>} path - Path to the queried object
+   * @param {object[]} steps - Query descriptor steps
+   * @returns {Promise<Array<{id: string, value: any}>>} Matching records
+   */
+  async query(path, steps) {
+    return evaluateQuery(await this.get(...path), steps, { path });
+  }
   
   /**
    * Recursively unescape all keys in an object
@@ -123,6 +135,10 @@ export class RedisDriver extends DeepBaseDriver {
    * - Some setups accept bare "a.b"
    * - RedisJSON v1 uses ".a.b" (root ".")
    * - RedisJSON v2 uses JSONPath "$.a.b" (root "$")
+   * Array indices need brackets ("$.tags[0]" / "$[0]"), so a bracketed form is
+   * appended after the dot-joined one to keep numeric object keys resolving.
+   * @param {Array<string|number>} parts - Path segments
+   * @returns {string[]} Candidate paths, most compatible first
    */
   _candidatePaths(parts) {
     if (!parts || parts.length === 0) {
@@ -131,10 +147,41 @@ export class RedisDriver extends DeepBaseDriver {
     }
     
     const joined = this._joinPathParts(parts);
-    return [
+    const paths = [
       '$.' + joined,
       '.' + joined
     ];
+
+    const bracketed = this._bracketedPath(parts);
+    if (bracketed !== null) {
+      paths.push('$' + bracketed, '.' + bracketed);
+    }
+
+    return paths;
+  }
+
+  /**
+   * Build a path that addresses numeric segments as array indices, e.g.
+   * "$.tags[0]" or "$[0]" without the root prefix.
+   * @param {Array<string|number>} parts - Path segments
+   * @returns {string|null} Bracketed path, or null when no segment is numeric
+   */
+  _bracketedPath(parts) {
+    let path = '';
+    let bracketed = false;
+
+    for (const part of parts) {
+      const segment = this._escapeDots(String(part));
+
+      if (/^\d+$/.test(segment)) {
+        path += '[' + segment + ']';
+        bracketed = true;
+      } else {
+        path += '.' + segment;
+      }
+    }
+
+    return bracketed ? path : null;
   }
   
   async _jsonGet(redisKey, parts) {
@@ -145,11 +192,13 @@ export class RedisDriver extends DeepBaseDriver {
       try {
         const result = await this.client.json.get(redisKey, { path });
         
-        // RedisJSON v2 JSONPath can return arrays (JSONPath returns "matches")
+        // RedisJSON v2 JSONPath returns the list of matches: an empty list, and
+        // the bare nil of a legacy path, both mean "no match for this syntax".
         if (Array.isArray(result)) {
-          // If this syntax produced "no matches", keep trying other syntaxes
           if (result.length === 0) continue;
           if (result.length === 1) return result[0];
+        } else if (result === null) {
+          continue;
         }
         return result;
       } catch (err) {
@@ -186,16 +235,22 @@ export class RedisDriver extends DeepBaseDriver {
   async _jsonDel(redisKey, parts) {
     const paths = this._candidatePaths(parts);
     let lastErr;
+    let answered = false;
     
     for (const path of paths) {
       try {
-        return await this.client.json.del(redisKey, path);
+        // JSON.DEL answers with the number of removed paths; zero means this
+        // syntax addressed nothing, so the next candidate gets a turn.
+        const count = await this.client.json.del(redisKey, path);
+        if (count > 0) return count;
+        answered = true;
       } catch (err) {
         lastErr = err;
       }
     }
     
-    throw lastErr;
+    if (!answered && lastErr) throw lastErr;
+    return 0;
   }
   
   async _ensureRootDoc(redisKey) {
@@ -285,6 +340,22 @@ export class RedisDriver extends DeepBaseDriver {
       await this.client.del(redisKey);
       return [key];
     }
+
+    // Deleting an array index shifts the remaining elements, the way pop() and
+    // shift() expect, so the shortened array replaces the stored one.
+    const lastKey = String(parts[parts.length - 1]);
+    if (/^\d+$/.test(lastKey)) {
+      const parentPath = parts.slice(0, -1);
+      const parent = await this.get(key, ...parentPath);
+
+      if (Array.isArray(parent)) {
+        const spliced = parent.slice();
+        if (removeKey(spliced, lastKey)) {
+          await this._jsonSet(redisKey, parentPath, this._escapeValue(spliced));
+          return [key, ...args];
+        }
+      }
+    }
     
     await this._jsonDel(redisKey, parts);
     
@@ -304,22 +375,54 @@ export class RedisDriver extends DeepBaseDriver {
   }
 
   async first(...args) {
-    const value = await this.get(...args);
-    if (value === null || typeof value !== 'object') {
-      return undefined;
-    }
+    const key = await this._boundaryKey(args, false);
+    return key === undefined ? this._boundaryKeyFromValue(args, false) : key;
+  }
 
-    for (const key in value) {
-      if (Object.prototype.hasOwnProperty.call(value, key)) {
-        return key;
+  async last(...args) {
+    const key = await this._boundaryKey(args, true);
+    return key === undefined ? this._boundaryKeyFromValue(args, true) : key;
+  }
+
+  /**
+   * Ask RedisJSON for the field names only, instead of transferring the whole
+   * document. Returns undefined whenever the path is not a JSON object, so the
+   * caller keeps the get()-based behavior.
+   * @param {Array<string|number>} path - Path to the queried object
+   * @param {boolean} fromEnd - Take the last key instead of the first
+   * @returns {Promise<string|undefined>} Boundary key
+   */
+  async _boundaryKey(path, fromEnd) {
+    const key = path[0];
+    if (key === undefined) return undefined;
+
+    const redisKey = this.name + ':' + key;
+    for (const candidate of this._candidatePaths(path.slice(1))) {
+      let reply;
+      try {
+        reply = await this.client.sendCommand(['JSON.OBJKEYS', redisKey, candidate]);
+      } catch {
+        continue;
       }
+
+      // JSONPath candidates wrap their matches in an outer array; the legacy
+      // "." syntax already answers with the plain key list.
+      const names = Array.isArray(reply) && reply.length === 1 && Array.isArray(reply[0])
+        ? reply[0]
+        : reply;
+      // A reply that is not a list of names means the path holds something else
+      // than a JSON object, which the generic path handles.
+      if (!Array.isArray(names) || names.length === 0
+        || !names.every(name => typeof name === 'string')) continue;
+
+      return this._unescapeDots(fromEnd ? names[names.length - 1] : names[0]);
     }
 
     return undefined;
   }
 
-  async last(...args) {
-    const value = await this.get(...args);
+  async _boundaryKeyFromValue(path, fromEnd) {
+    const value = await this.get(...path);
     if (value === null || typeof value !== 'object') {
       return undefined;
     }
@@ -327,6 +430,7 @@ export class RedisDriver extends DeepBaseDriver {
     let last;
     for (const key in value) {
       if (Object.prototype.hasOwnProperty.call(value, key)) {
+        if (!fromEnd) return key;
         last = key;
       }
     }
@@ -379,4 +483,3 @@ export class RedisDriver extends DeepBaseDriver {
 }
 
 export default RedisDriver;
-

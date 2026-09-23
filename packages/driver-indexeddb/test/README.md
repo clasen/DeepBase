@@ -4,10 +4,27 @@ Since IndexedDB is a browser API, tests must be run in a browser environment.
 
 ## Running Tests
 
-1. Open `test.html` in a web browser
-2. Tests will automatically run when the page loads
-3. You can also click "Run All Tests" button to re-run tests
-4. Use "Clear Database" to reset the test database
+Serve the repository over HTTP and open `test.html` in a browser:
+
+```bash
+# from the repository root
+python3 -m http.server 8791
+# then open http://127.0.0.1:8791/packages/driver-indexeddb/test/test.html
+```
+
+Opening the file directly (`file://`) does not work: the page loads ES modules, which the browser blocks outside `http(s)`, and the library uses bare specifiers that the import map inside `test.html` resolves. Once served, tests run automatically on load, the "Run All Tests" button re-runs them, and "Clear Database" resets the test database.
+
+### Headless
+
+`run-headless.js` serves the repository itself and drives a local Chrome/Chromium build through the DevTools protocol, so no npm dependency is required:
+
+```bash
+node packages/driver-indexeddb/test/run-headless.js
+# or point at a specific binary:
+CHROME_PATH="/path/to/chrome" node packages/driver-indexeddb/test/run-headless.js
+```
+
+It prints one line per test, exits non-zero when any test fails, and accepts `--port <port>` and `--timeout <ms>`.
 
 ## Test Files
 
@@ -55,4 +72,3 @@ Tests should work in:
 - Safari 10+
 - Edge (all versions)
 - Opera 15+
-

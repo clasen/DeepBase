@@ -268,6 +268,23 @@ const values = await db.values('users');
 const entries = await db.entries('users');
 ```
 
+### Query Operations
+
+```javascript
+// Chain a query over the object at path and run it with a terminal method
+const adults = await db.query('users').where('age', '>=', 18).orderBy('name').toArray();
+// [{ id: 'alice', value: { name: 'Alice', age: 30 } }, ...]
+
+const first = await db.query('users').where('age', '>=', 18).first();
+const total = await db.query('users').count();
+const hasAny = await db.query('users').any();
+```
+
+`query()` reads the object at the path with `get()` and evaluates the chain in
+memory, so it walks the object already read: v1 pushes no filters to IndexedDB
+and uses no indexes. Terminals resolve to `{ id, value }` records, where `id` is
+the property name and `value` the stored value.
+
 ## 🔒 Concurrency Safety
 
 The IndexedDB driver includes built-in operation queuing to prevent race conditions:

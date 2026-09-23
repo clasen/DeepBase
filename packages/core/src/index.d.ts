@@ -124,6 +124,97 @@ export interface DeepBaseSchemaValidationResult {
     errors: DeepBaseSchemaIssue[];
 }
 
+/**
+ * Remove one key from an object or an array. Array indices are spliced so the
+ * array shrinks, matching `pop()` / `shift()`; a key that does not exist is
+ * left untouched. Drivers use this for `del()`.
+ * @returns True when something was removed
+ */
+export function removeKey(target: any, key: string | number): boolean;
+
+export type DeepBaseQueryOperator = '=' | '==' | '!=' | '<>' | '>' | '>=' | '<' | '<=' | 'in';
+export type DeepBaseQueryDirection = 'asc' | 'desc';
+export type DeepBaseQueryField = string | string[];
+
+export interface DeepBaseQueryWhereStep {
+    type: 'where';
+    field: string[];
+    operator: DeepBaseQueryOperator;
+    value: any;
+}
+
+export interface DeepBaseQueryOrderByStep {
+    type: 'orderBy';
+    field: string[];
+    direction: DeepBaseQueryDirection;
+}
+
+export interface DeepBaseQuerySkipStep {
+    type: 'skip';
+    count: number;
+}
+
+export interface DeepBaseQueryTakeStep {
+    type: 'take';
+    count: number;
+}
+
+export interface DeepBaseQuerySelectStep {
+    type: 'select';
+    fields: string[][];
+}
+
+export type DeepBaseQueryStep =
+    | DeepBaseQueryWhereStep
+    | DeepBaseQueryOrderByStep
+    | DeepBaseQuerySkipStep
+    | DeepBaseQueryTakeStep
+    | DeepBaseQuerySelectStep;
+
+export interface DeepBaseQueryRecord<T = any> {
+    id: string;
+    value: T;
+}
+
+/**
+ * Turn the value stored at a path into records and apply the query steps in
+ * chain order. Shared evaluator: drivers read the value from their own storage
+ * and delegate to this function.
+ */
+export function evaluateQuery<T = any>(
+    collection: unknown,
+    steps?: DeepBaseQueryStep[],
+    options?: { path?: Array<string | number> },
+): DeepBaseQueryRecord<T>[];
+
+/**
+ * Translate a leading run of `skip()`/`take()` steps into an offset/limit
+ * window. `limit` is `null` when the run leaves the result unbounded. Drivers
+ * that can address a sub-range of their storage read only that window and then
+ * evaluate `rest` in memory.
+ */
+export function resolveQueryWindow(steps: DeepBaseQueryStep[]): {
+    offset: number;
+    limit: number | null;
+    rest: DeepBaseQueryStep[];
+} | null;
+
+/** Chainable query. Building the chain performs no I/O. */
+export class DeepBaseQuery<T = any> {
+    constructor(db: DeepBase, path?: Array<string | number>);
+
+    where(field: DeepBaseQueryField, operator: DeepBaseQueryOperator, value: any): this;
+    orderBy(field: DeepBaseQueryField, direction?: DeepBaseQueryDirection): this;
+    skip(count: number): this;
+    take(count: number): this;
+    select(field: DeepBaseQueryField, ...fields: DeepBaseQueryField[]): this;
+
+    toArray(): Promise<DeepBaseQueryRecord<T>[]>;
+    first(): Promise<DeepBaseQueryRecord<T> | null>;
+    count(): Promise<number>;
+    any(): Promise<boolean>;
+}
+
 export class DeepBaseDriver {
     constructor(options?: DeepBaseDriverOptions);
 
@@ -139,6 +230,8 @@ export class DeepBaseDriver {
 
     get(...args: any[]): Promise<any>;
     getSync(...args: any[]): any;
+    /** Drivers override this; the base class reports that query() is unsupported. */
+    query(path: Array<string | number>, steps: DeepBaseQueryStep[]): Promise<DeepBaseQueryRecord[]>;
     set(...args: any[]): Promise<any>;
     del(...args: any[]): Promise<any>;
     inc(...args: any[]): Promise<any>;
@@ -213,6 +306,7 @@ export class DeepBase {
 
     get(...args: any[]): Promise<any>;
     getSync(...args: any[]): any;
+    query(...path: (string | number)[]): DeepBaseQuery;
     set(...args: any[]): Promise<any>;
     del(...args: any[]): Promise<any>;
     inc(...args: any[]): Promise<any>;

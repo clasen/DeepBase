@@ -1,5 +1,7 @@
 import assert from 'assert';
 import { DeepBase } from '../../core/src/index.js';
+import { arrayScenarios } from '../../core/test/array-scenario.js';
+import { queryScenarios, seedQueryFixture } from '../../core/test/query-scenario.js';
 import { RedisDriver } from '../src/RedisDriver.js';
 
 describe('RedisDriver', function() {
@@ -434,5 +436,24 @@ describe('RedisDriver', function() {
       assert.strictEqual(keys.length, operations);
     });
   });
-});
 
+  describe('query()', function() {
+    beforeEach(async function() {
+      await seedQueryFixture(db);
+    });
+
+    for (const scenario of queryScenarios) {
+      it(scenario.title, async function() {
+        await scenario.run(db);
+      });
+    }
+  });
+
+  describe('Array Operations', function() {
+    for (const scenario of arrayScenarios) {
+      it(scenario.title, async function() {
+        await scenario.run(db);
+      });
+    }
+  });
+});

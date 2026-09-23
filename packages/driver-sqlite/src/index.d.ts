@@ -24,6 +24,13 @@ export interface SqliteDriverOptions extends DeepBaseDriverOptions {
     pragma?: 'none' | 'safe' | 'balanced' | 'fast';
     busyTimeoutMs?: number;
     busyRetry?: SqliteBusyRetryOptions;
+    /**
+     * Records a native `query()` window may reach, counting `offset + limit`.
+     * Beyond it the driver reads the collection and evaluates in memory.
+     */
+    queryWindowMaxRecords?: number;
+    /** Key-index lookups the `query()` order guard may spend before falling back. */
+    queryWindowMaxProbes?: number;
 }
 
 export class SqliteDriver extends DeepBaseDriver {
@@ -35,6 +42,8 @@ export class SqliteDriver extends DeepBaseDriver {
     pragma: string;
     busyTimeoutMs: number;
     busyRetry: Required<SqliteBusyRetryOptions>;
+    queryWindowMaxRecords: number;
+    queryWindowMaxProbes: number;
 
     /** Opens the existing database read-only, runs `PRAGMA integrity_check`,
      *  then closes it. Does not connect or mutate the driver database. */

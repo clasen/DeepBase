@@ -4,6 +4,8 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { DeepBase } from '../../core/src/index.js';
+import { arrayScenarios } from '../../core/test/array-scenario.js';
+import { seedQueryFixture, queryScenarios } from '../../core/test/query-scenario.js';
 import { SqliteDriver } from '../src/SqliteDriver.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -21,6 +23,21 @@ describe('SqliteDriver configuration', function () {
       () => new SqliteDriver({ name: 'relative-path', path: './data' }),
       /requires an absolute "path" option/,
     );
+  });
+
+  it('should reject invalid query window budgets', function () {
+    const options = { name: 'config', path: testDataPath };
+    assert.throws(
+      () => new SqliteDriver({ ...options, queryWindowMaxRecords: -1 }),
+      /queryWindowMaxRecords must be a non-negative integer/,
+    );
+    assert.throws(
+      () => new SqliteDriver({ ...options, queryWindowMaxProbes: 1.5 }),
+      /queryWindowMaxProbes must be a non-negative integer/,
+    );
+    const driver = new SqliteDriver(options);
+    assert.strictEqual(driver.queryWindowMaxRecords, 1000);
+    assert.strictEqual(driver.queryWindowMaxProbes, 12000);
   });
 });
 
@@ -198,6 +215,14 @@ for (const pragma of PRAGMA_MODES) {
         await db.del();
         assert.deepStrictEqual(await db.get(), {});
       });
+    });
+
+    describe('del()/pop()/shift() sobre arrays', function () {
+      for (const scenario of arrayScenarios) {
+        it(scenario.title, async function () {
+          await scenario.run(db);
+        });
+      }
     });
 
     describe('Add Operation', function () {
@@ -857,6 +882,164 @@ for (const pragma of PRAGMA_MODES) {
           assert.strictEqual(await db.get('key'), 'value');
         });
       }
+    });
+
+    describe('query()', function () {
+      beforeEach(async function () {
+        await seedQueryFixture(db);
+      });
+
+      for (const scenario of queryScenarios) {
+        it(scenario.title, async function () {
+          await scenario.run(db);
+        });
+      }
+    });
+
+    describe('query() native window', function () {
+      // Same file, same data, but without the key-index window: the reference
+      // always reads the collection and evaluates every step in memory.
+      let reference;
+
+      beforeEach(async function () {
+        reference = new DeepBase(new SqliteDriver({
+          name: `test-${pragma}-${testCounter}`,
+          path: testDataPath,
+          pragma,
+          queryWindowMaxRecords: 0,
+        }));
+        await reference.connect();
+      });
+
+      afterEach(async function () {
+        await reference.disconnect();
+      });
+
+      // One row per field, so records live in fragmented rows.
+      async function seedRecords(ids) {
+        await db.del();
+        for (const [index, id] of ids.entries()) {
+          await db.set('users', id, 'name', `name ${id}`);
+          await db.set('users', id, 'age', index);
+          await db.set('users', id, 'address', 'city', 'Rosario');
+        }
+      }
+
+      const countRecords = length =>
+        Array.from({ length }, (unused, index) => `u${String(index).padStart(3, '0')}`);
+
+      // Record ids that make the key index order disagree with the record order.
+      const ID_SETS = [
+        ['u000', 'u001', 'u002', 'u003', 'u004', 'u005'],
+        ['u1', 'u1!', 'u2'],
+        ['.hidden', '0alpha', 'z'],
+        ['a.b', 'a0', 'a1'],
+        ['x', 'x\\y', 'y'],
+        ['', 'a', 'b'],
+      ];
+      const CHAINS = [
+        query => query.take(1),
+        query => query.take(2),
+        query => query.skip(1).take(2),
+        query => query.take(2).skip(1),
+        query => query.skip(3),
+        query => query.take(0),
+        query => query.take(2).where('age', '>', 0),
+      ];
+
+      function instrument(driver) {
+        const probe = { rows: 0, checks: 0 };
+        const all = driver.getChildrenStmt.all.bind(driver.getChildrenStmt);
+        driver.getChildrenStmt.all = (...args) => {
+          const rows = all(...args);
+          probe.rows += rows.length;
+          return rows;
+        };
+        const range = driver.hasRangeStmt.get.bind(driver.hasRangeStmt);
+        driver.hasRangeStmt.get = (...args) => {
+          probe.checks++;
+          return range(...args);
+        };
+        return probe;
+      }
+
+      it('matches the generic path for windows and pathological ids', async function () {
+        for (const ids of ID_SETS) {
+          await seedRecords(ids);
+          for (const chain of CHAINS) {
+            for (const terminal of ['toArray', 'first', 'count', 'any']) {
+              const native = await chain(db.query('users'))[terminal]();
+              const generic = await chain(reference.query('users'))[terminal]();
+              assert.deepStrictEqual(native, generic, `${JSON.stringify(ids)} / ${terminal}`);
+            }
+          }
+        }
+      });
+
+      it('keeps the record order for ids that break the key order', async function () {
+        await seedRecords(['u1', 'u1!', 'u2']);
+        assert.deepStrictEqual(
+          (await db.query('users').take(1).toArray()).map(record => record.id),
+          ['u1'],
+        );
+        assert.deepStrictEqual(
+          (await db.query('users').skip(1).toArray()).map(record => record.id),
+          ['u1!', 'u2'],
+        );
+
+        await seedRecords(['.hidden', '0alpha', 'z']);
+        assert.deepStrictEqual(
+          (await db.query('users').take(1).toArray()).map(record => record.id),
+          ['.hidden'],
+        );
+      });
+
+      it('reads only the records the window keeps', async function () {
+        await seedRecords(countRecords(60));
+
+        const nativeProbe = instrument(db.getDriver(0));
+        const native = await db.query('users').take(5).toArray();
+        const genericProbe = instrument(reference.getDriver(0));
+        const generic = await reference.query('users').take(5).toArray();
+
+        assert.deepStrictEqual(native, generic);
+        assert.strictEqual(native.length, 5);
+        assert.ok(nativeProbe.checks > 0, 'the window guard did not run');
+        assert.ok(nativeProbe.rows <= 20, `native window read ${nativeProbe.rows} child rows`);
+        assert.ok(genericProbe.rows >= 120, `generic path read only ${genericProbe.rows} child rows`);
+      });
+
+      it('answers first() and any() from the window', async function () {
+        await seedRecords(countRecords(60));
+
+        const probe = instrument(db.getDriver(0));
+        assert.deepStrictEqual(await db.query('users').first(), {
+          id: 'u000',
+          value: { name: 'name u000', age: 0, address: { city: 'Rosario' } },
+        });
+        assert.strictEqual(await db.query('users').any(), true);
+        assert.ok(probe.checks > 0, 'first()/any() did not use the window');
+        assert.ok(probe.rows <= 8, `first()/any() read ${probe.rows} child rows`);
+      });
+
+      it('leaves chains that another step opens on the generic path', async function () {
+        await seedRecords(countRecords(20));
+
+        const probe = instrument(db.getDriver(0));
+        const filtered = await db.query('users').where('age', '=', 7).take(2).toArray();
+        assert.strictEqual(filtered.length, 1);
+        assert.strictEqual(probe.checks, 0);
+
+        const ordered = await db.query('users').orderBy('age').take(2).toArray();
+        assert.strictEqual(ordered.length, 2);
+        assert.strictEqual(probe.checks, 0);
+
+        const deep = await db.query('users').skip(500).take(2).toArray();
+        assert.deepStrictEqual(deep, []);
+        // A skip past the end still answers from the key index, without
+        // rebuilding the records it drops.
+        assert.ok(probe.checks > 0, 'skip past the end did not use the window');
+      });
     });
   });
 }

@@ -1,6 +1,6 @@
 {
   "name": "deepbase-indexeddb",
-  "version": "3.10.1",
+  "version": "3.11.0",
   "description": "⚡ DeepBase IndexedDB - browser storage driver",
   "type": "module",
   "main": "src/index.cjs",
@@ -15,10 +15,11 @@
   },
   "dependencies": {},
   "peerDependencies": {
-    "deepbase": "^3.10.1"
+    "deepbase": "^3.11.0"
   },
   "scripts": {
-    "test": "echo \"IndexedDB tests require browser environment. See test/test.html\""
+    "test": "echo \"IndexedDB tests need a browser: run npm run test:browser (headless Chrome) or open test/test.html over HTTP\"",
+    "test:browser": "node test/run-headless.js"
   },
   "repository": {
     "type": "git",

@@ -62,6 +62,8 @@ new SqliteDriver({
     baseDelayMs: 25,          // Exponential backoff base
     maxDelayMs: 250           // Backoff cap
   },
+  queryWindowMaxRecords: 1000, // query() records a native window may reach
+  queryWindowMaxProbes: 12000, // query() lookups the order guard may spend
   nidAlphabet: 'ABC...',      // Alphabet for ID generation
   nidLength: 10               // Length of generated IDs
 })
@@ -142,6 +144,35 @@ Efficiently stores nested objects using a key-value schema:
 - Fast lookups for both exact keys and partial paths
 
 Each row also stores a database-assigned `seq` so reads that rebuild objects use `ORDER BY seq, key`. That matches JavaScript insertion order for sibling keys and keeps `shift()` / `pop()` aligned with `JsonDriver`. For legacy databases, the driver only adds the missing column and index; it does not renumber existing rows. Historical ties remain deterministic through the `key` fallback order.
+
+### Querying
+
+`db.query(...path)` evaluates `where` / `orderBy` / `skip` / `take` / `select` in memory and never pushes filters into SQLite. Terminals (`toArray`, `first`, `count`, `any`) return records shaped `{ id, value }`, where `id` is the property name and `value` the stored value:
+
+```javascript
+const adults = await db.query('users').where('age', '>=', 18).orderBy('age').toArray();
+// [{ id: 'alice', value: { name: 'Alice', age: 30 } }, ...]
+```
+
+#### Native pagination window
+
+When the chain *starts* with `skip()`/`take()`, the driver answers that window from the key index and rebuilds only the records the window keeps, instead of materialising the whole collection. `first()` and `any()` use the same path because they are a single-record window.
+
+```javascript
+// Reads the key index plus 10 records, not the 20,000 records in the collection.
+const page = await db.query('users').skip(100).take(10).toArray();
+
+// Filters and ordering still run in memory, so a leading where()/orderBy()
+// falls back to reading the collection.
+const adults = await db.query('users').where('age', '>=', 18).take(10).toArray();
+```
+
+Two guards keep the native window cheaper than reading the collection, both configurable on the driver:
+
+- `queryWindowMaxRecords` (default `1000`): how far `offset + limit` may reach before the driver reads the collection instead.
+- `queryWindowMaxProbes` (default `12000`): how many key-index lookups the order guard may spend. The guard exists because stored keys escape `.` and `\` and expand records into `<key>.<field>` rows, so a plain key scan can disagree with the record order for ids such as `u1` and `u1!`; when it cannot prove the order, the driver falls back to the generic path.
+
+Set either budget to `0` to always use the generic path. Measurements on 20,000 records (80,000 rows, 4 fields each): `first()` 71 ms → 0.04 ms, `take(10)` 71 ms → 0.14 ms, `skip(100).take(10)` 69 ms → 0.8 ms, `take(1000)` 70 ms → 13 ms.
 
 ### ACID Compliance
 

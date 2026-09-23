@@ -3,6 +3,8 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { DeepBase } from '../../core/src/index.js';
+import { arrayScenarios } from '../../core/test/array-scenario.js';
+import { seedQueryFixture, queryScenarios } from '../../core/test/query-scenario.js';
 import { createSqliteDrizzleDriver } from './sqlite-fixture.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -191,6 +193,14 @@ for (const pragma of PRAGMA_MODES) {
         await db.del();
         assert.deepStrictEqual(await db.get(), {});
       });
+    });
+
+    describe('del()/pop()/shift() sobre arrays', function () {
+      for (const scenario of arrayScenarios) {
+        it(scenario.title, async function () {
+          await scenario.run(db);
+        });
+      }
     });
 
     describe('Add Operation', function () {
@@ -754,6 +764,18 @@ for (const pragma of PRAGMA_MODES) {
         await Promise.all(Array.from({ length: 100 }, () => db.dec('inventory', 5)));
         assert.strictEqual(await db.get('inventory'), 500);
       });
+    });
+
+    describe('query()', function () {
+      beforeEach(async function () {
+        await seedQueryFixture(db);
+      });
+
+      for (const scenario of queryScenarios) {
+        it(scenario.title, async function () {
+          await scenario.run(db);
+        });
+      }
     });
   });
 }

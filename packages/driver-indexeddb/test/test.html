@@ -99,6 +99,16 @@
   <div id="tests"></div>
   <div id="summary"></div>
 
+  <!-- Served over HTTP, the browser needs an import map for the bare specifiers
+       the library uses: "deepbase" in the drivers and "nanoid" in the core. -->
+  <script type="importmap">
+    {
+      "imports": {
+        "deepbase": "../../core/src/index.js",
+        "nanoid": "../../../node_modules/nanoid/index.browser.js"
+      }
+    }
+  </script>
   <script type="module">
     // Import DeepBase (now works in browser without bundler thanks to dynamic imports!)
     import DeepBase from '../../core/src/index.js';
@@ -162,6 +172,11 @@
         { name: 'Shift from array', fn: testShift },
         { name: 'Concurrent operations', fn: testConcurrency },
         { name: 'Complex nested objects', fn: testComplexObjects },
+        { name: 'Array pop/shift/del', fn: testArrayOperations },
+        { name: 'Query filter and nested paths', fn: testQueryFilters },
+        { name: 'Query order, skip and take', fn: testQueryOrderAndPagination },
+        { name: 'Query select and terminals', fn: testQuerySelectAndTerminals },
+        { name: 'Query missing path and invalid target', fn: testQueryValidation },
         { name: 'Disconnect', fn: testDisconnect }
       ];
 
@@ -366,6 +381,220 @@
       return `Complex object stored and retrieved successfully`;
     }
 
+    // query() reads the object at the path with get() and evaluates the chain in
+    // memory, so these checks mirror core/test/query-scenario.js.
+    async function testArrayOperations() {
+      const arrayDb = new window.DeepBase(new window.IndexedDBDriver({
+        name: 'deepbase-array-test',
+        version: 1
+      }));
+      await arrayDb.connect();
+
+      try {
+        await arrayDb.del();
+
+        await arrayDb.set('myArray', [1, 2, 3, 4, 5]);
+        assertQueryValue(await arrayDb.pop('myArray'), 5, 'pop returns the last element');
+        assertQueryValue(await arrayDb.get('myArray'), [1, 2, 3, 4], 'pop shrinks the array');
+
+        await arrayDb.set('myArray', [1, 2, 3, 4, 5]);
+        assertQueryValue(await arrayDb.shift('myArray'), 1, 'shift returns the first element');
+        assertQueryValue(await arrayDb.get('myArray'), [2, 3, 4, 5], 'shift shrinks the array');
+
+        await arrayDb.set('myArray', ['a', 'b', 'c', 'd']);
+        await arrayDb.del('myArray', '1');
+        assertQueryValue(await arrayDb.get('myArray'), ['a', 'c', 'd'], 'del splices the index');
+
+        await arrayDb.set('myArray', [1, 2, 3]);
+        await arrayDb.del('myArray', '9');
+        await arrayDb.del('myArray', 'not-an-index');
+        assertQueryValue(await arrayDb.get('myArray'), [1, 2, 3], 'del ignores indexes it does not have');
+
+        await arrayDb.set('config', 'tags', ['a', 'b', 'c']);
+        assertQueryValue(await arrayDb.pop('config', 'tags'), 'c', 'nested pop');
+        assertQueryValue(await arrayDb.get('config', 'tags'), ['a', 'b'], 'nested pop shrinks the array');
+
+        await arrayDb.set('queue', 'a', { n: 1 });
+        await arrayDb.set('queue', 'b', { n: 2 });
+        assertQueryValue(await arrayDb.shift('queue'), { n: 1 }, 'shift still works on keyed collections');
+        assertQueryValue(await arrayDb.get('queue'), { b: { n: 2 } }, 'keyed collection keeps its remaining key');
+
+        return 'Arrays shrink on pop/shift/del and keyed collections keep working';
+      } finally {
+        await arrayDb.del();
+        await arrayDb.disconnect();
+      }
+    }
+
+    const QUERY_RECORDS = {
+      u1: { name: 'Ana', age: 31, address: { city: 'Rosario' } },
+      u2: { name: 'Beto', age: 18 },
+      u3: { name: 'Caro', age: 45, address: { city: 'Córdoba' } },
+      u4: { name: 'Dani', age: 18, address: { city: 'Rosario' } },
+      u5: { name: 'Eva' },
+      u6: { name: 'Fabi', age: null }
+    };
+
+    const QUERY_IDS = Object.keys(QUERY_RECORDS);
+
+    function assertQueryValue(actual, expected, label) {
+      if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+        throw new Error(`${label}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
+      }
+    }
+
+    async function seedQueryFixture(queryDb) {
+      await queryDb.del();
+      for (const id of QUERY_IDS) {
+        await queryDb.set('users', id, QUERY_RECORDS[id]);
+      }
+      await queryDb.set('flag', true);
+      await queryDb.set('list', [1, 2, 3]);
+      await queryDb.set('settings', 'theme', 'dark');
+    }
+
+    async function withQueryFixture(run) {
+      const queryDb = new window.DeepBase(new window.IndexedDBDriver({
+        name: 'deepbase-query-test',
+        version: 1
+      }));
+      await queryDb.connect();
+      try {
+        await seedQueryFixture(queryDb);
+        return await run(queryDb);
+      } finally {
+        await queryDb.disconnect();
+      }
+    }
+
+    async function testQueryFilters() {
+      return withQueryFixture(async queryDb => {
+        const ids = records => records.map(record => record.id);
+
+        assertQueryValue(ids(await queryDb.query('users').toArray()), QUERY_IDS, 'records ordered by key');
+        assertQueryValue(ids(await queryDb.query('users').where('age', '=', 18).toArray()), ['u2', 'u4'], 'equality');
+        assertQueryValue(ids(await queryDb.query('users').where('age', '!=', 18).toArray()), ['u1', 'u3', 'u6'], 'inequality');
+        assertQueryValue(ids(await queryDb.query('users').where('age', '>', 18).toArray()), ['u1', 'u3'], 'greater than');
+        assertQueryValue(ids(await queryDb.query('users').where('age', '>=', 31).toArray()), ['u1', 'u3'], 'greater or equal');
+        assertQueryValue(ids(await queryDb.query('users').where('age', '<', 31).toArray()), ['u2', 'u4'], 'less than');
+        assertQueryValue(ids(await queryDb.query('users').where('age', '<=', 18).toArray()), ['u2', 'u4'], 'less or equal');
+        assertQueryValue(ids(await queryDb.query('users').where('name', 'in', ['Ana', 'Caro']).toArray()), ['u1', 'u3'], 'in');
+        assertQueryValue(await queryDb.query('users').where('name', 'in', []).toArray(), [], 'in with an empty list');
+
+        assertQueryValue(
+          ids(await queryDb.query('users').where('age', '>=', 18).where('address.city', '=', 'Rosario').toArray()),
+          ['u1', 'u4'],
+          'several where() steps'
+        );
+        assertQueryValue(ids(await queryDb.query('users').where('address.city', '=', 'Rosario').toArray()), ['u1', 'u4'], 'nested field');
+        assertQueryValue(ids(await queryDb.query('users').where(['address', 'city'], '=', 'Córdoba').toArray()), ['u3'], 'path segments');
+        assertQueryValue(ids(await queryDb.query('users').where('address.city', '=', 'Salta').toArray()), [], 'unmatched nested field');
+
+        assertQueryValue(ids(await queryDb.query('users').where('age', '=', null).toArray()), ['u6'], 'explicit null');
+        assertQueryValue(ids(await queryDb.query('users').where('missing', '=', null).toArray()), [], 'missing field');
+        assertQueryValue(ids(await queryDb.query('users').where('address.city', '=', null).toArray()), [], 'missing nested field');
+
+        assertQueryValue(await queryDb.query('users').where('age', '=', '18').toArray(), [], 'equality without coercion');
+        assertQueryValue(await queryDb.query('users').where('age', '>', '20').toArray(), [], 'range without coercion');
+        assertQueryValue(await queryDb.query('users').where('name', 'in', [1, 2]).toArray(), [], 'in without coercion');
+
+        return 'Filter and nested path results matched the shared fixture';
+      });
+    }
+
+    async function testQueryOrderAndPagination() {
+      return withQueryFixture(async queryDb => {
+        const ids = records => records.map(record => record.id);
+
+        assertQueryValue(ids(await queryDb.query('users').orderBy('age').toArray()), ['u2', 'u4', 'u1', 'u3', 'u5', 'u6'], 'ascending order');
+        assertQueryValue(ids(await queryDb.query('users').orderBy('age', 'desc').toArray()), ['u5', 'u6', 'u3', 'u1', 'u2', 'u4'], 'descending order');
+        assertQueryValue(ids(await queryDb.query('users').orderBy('address.city').toArray()), ['u3', 'u1', 'u4', 'u2', 'u5', 'u6'], 'nested field order');
+        assertQueryValue(ids(await queryDb.query('users').orderBy(['address', 'city'], 'desc').toArray()), ['u2', 'u5', 'u6', 'u1', 'u4', 'u3'], 'nested path descending order');
+
+        assertQueryValue(ids(await queryDb.query('users').orderBy('age').skip(1).take(2).toArray()), ['u4', 'u1'], 'skip then take');
+        assertQueryValue(ids(await queryDb.query('users').skip(4).toArray()), ['u5', 'u6'], 'skip');
+        assertQueryValue(ids(await queryDb.query('users').take(0).toArray()), [], 'take zero');
+        assertQueryValue(ids(await queryDb.query('users').skip(10).toArray()), [], 'skip past the end');
+        assertQueryValue(ids(await queryDb.query('users').take(2).where('age', '>', 18).toArray()), ['u1'], 'take before where');
+
+        return 'Order and pagination results matched the shared fixture';
+      });
+    }
+
+    async function testQuerySelectAndTerminals() {
+      return withQueryFixture(async queryDb => {
+        const values = records => records.map(record => record.value);
+
+        assertQueryValue(
+          values(await queryDb.query('users').select('name').toArray()),
+          QUERY_IDS.map(id => ({ name: QUERY_RECORDS[id].name })),
+          'select a single field'
+        );
+        assertQueryValue(
+          values(await queryDb.query('users').select('name', 'address.city').toArray()),
+          [
+            { name: 'Ana', address: { city: 'Rosario' } },
+            { name: 'Beto' },
+            { name: 'Caro', address: { city: 'Córdoba' } },
+            { name: 'Dani', address: { city: 'Rosario' } },
+            { name: 'Eva' },
+            { name: 'Fabi' }
+          ],
+          'select paths'
+        );
+        assertQueryValue(
+          values(await queryDb.query('users').select(['age']).where('age', '>', 30).toArray()),
+          [{ age: 31 }, { age: 45 }],
+          'select after where'
+        );
+        assertQueryValue(
+          values(await queryDb.query('users').select('missing').toArray()),
+          [{}, {}, {}, {}, {}, {}],
+          'select a missing field'
+        );
+
+        assertQueryValue(await queryDb.query('users').first(), { id: 'u1', value: QUERY_RECORDS.u1 }, 'first record');
+        assertQueryValue(await queryDb.query('users').orderBy('age', 'desc').first(), { id: 'u5', value: QUERY_RECORDS.u5 }, 'first after orderBy');
+        assertQueryValue(await queryDb.query('users').where('age', '<', 10).first(), null, 'first with no match');
+        assertQueryValue(await queryDb.query('users').count(), 6, 'count');
+        assertQueryValue(await queryDb.query('users').where('age', '=', 18).count(), 2, 'count with where');
+        assertQueryValue(await queryDb.query('users').any(), true, 'any');
+        assertQueryValue(await queryDb.query('users').where('age', '>', 100).any(), false, 'any with no match');
+
+        return 'Projection and terminal results matched the shared fixture';
+      });
+    }
+
+    async function testQueryValidation() {
+      return withQueryFixture(async queryDb => {
+        assertQueryValue(await queryDb.query('missing').toArray(), [], 'missing path toArray');
+        assertQueryValue(await queryDb.query('users', 'nobody').toArray(), [], 'missing nested path');
+        assertQueryValue(await queryDb.query('missing').first(), null, 'missing path first');
+        assertQueryValue(await queryDb.query('missing').count(), 0, 'missing path count');
+        assertQueryValue(await queryDb.query('missing').any(), false, 'missing path any');
+
+        const rejectsQuery = async (promise, pattern, label) => {
+          try {
+            await promise;
+          } catch (error) {
+            if (pattern.test(error.message)) return;
+            throw new Error(`${label}: unexpected error "${error.message}"`);
+          }
+          throw new Error(`${label}: expected the query to reject`);
+        };
+
+        await rejectsQuery(queryDb.query('flag').toArray(), /requires an object at "flag", received boolean/, 'boolean target');
+        await rejectsQuery(queryDb.query('list').toArray(), /requires an object at "list", received array/, 'array target');
+        await rejectsQuery(queryDb.query('settings', 'theme').toArray(), /requires an object at "settings.theme", received string/, 'string target');
+
+        const rootRecords = await queryDb.query().toArray();
+        assertQueryValue(rootRecords.map(record => record.id), ['flag', 'list', 'settings', 'users'], 'root keys');
+        assertQueryValue(await queryDb.query().count(), 4, 'root count');
+
+        return 'Missing paths, invalid targets and the root query matched the shared fixture';
+      });
+    }
+
     async function testDisconnect() {
       await db.disconnect();
       return 'Database disconnected';
@@ -379,4 +608,3 @@
   </script>
 </body>
 </html>
-

@@ -4,6 +4,8 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { fork } from 'child_process';
 import { DeepBase } from '../../core/src/index.js';
+import { arrayScenarios } from '../../core/test/array-scenario.js';
+import { seedQueryFixture, queryScenarios } from '../../core/test/query-scenario.js';
 import { JsonDriver } from '../src/JsonDriver.js';
 import { SqliteDriver } from '../../driver-sqlite/src/SqliteDriver.js';
 
@@ -904,6 +906,26 @@ describe('JsonDriver', function() {
       await mpDb.disconnect();
       JsonDriver._instances = {};
     });
+  });
+
+  describe('query()', function() {
+    beforeEach(async function() {
+      await seedQueryFixture(db);
+    });
+
+    for (const scenario of queryScenarios) {
+      it(scenario.title, async function() {
+        await scenario.run(db);
+      });
+    }
+  });
+
+  describe('array operations', function() {
+    for (const scenario of arrayScenarios) {
+      it(scenario.title, async function() {
+        await scenario.run(db);
+      });
+    }
   });
 });
 

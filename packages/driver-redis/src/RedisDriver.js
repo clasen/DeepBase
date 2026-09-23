@@ -1,4 +1,4 @@
-import { DeepBaseDriver } from 'deepbase';
+import { DeepBaseDriver, evaluateQuery, removeKey } from 'deepbase';
 import { createClient } from 'redis';
 
 export class RedisDriver extends DeepBaseDriver {
@@ -49,6 +49,18 @@ export class RedisDriver extends DeepBaseDriver {
     } catch (error) {
       return null;
     }
+  }
+
+  /**
+   * Run a query descriptor over the object stored at ...path.
+   * The value is read from Redis and evaluated in memory; filters are not
+   * pushed to the server and no indexes are used.
+   * @param {Array<string|number>} path - Path to the queried object
+   * @param {object[]} steps - Query descriptor steps
+   * @returns {Promise<Array<{id: string, value: any}>>} Matching records
+   */
+  async query(path, steps) {
+    return evaluateQuery(await this.get(...path), steps, { path });
   }
   
   async _acquireLock(key) {
@@ -176,9 +188,11 @@ export class RedisDriver extends DeepBaseDriver {
       }
       
       const lastKey = args[args.length - 1];
-      delete current[lastKey];
-      
-      await this.client.set(redisKey, JSON.stringify(data));
+      // Array indices are spliced so the array shrinks instead of keeping a
+      // hole that JSON.stringify renders as null.
+      if (removeKey(current, lastKey)) {
+        await this.client.set(redisKey, JSON.stringify(data));
+      }
     }
     
     return [key, ...args];

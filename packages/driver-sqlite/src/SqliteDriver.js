@@ -1,4 +1,4 @@
-import { DeepBaseDriver } from 'deepbase';
+import { DeepBaseDriver, evaluateQuery, removeKey, resolveQueryWindow } from 'deepbase';
 import Database from 'better-sqlite3';
 import fs from 'fs';
 import * as pathModule from 'path';
@@ -8,20 +8,37 @@ import { backupFrom, checkIntegrityAt, checkpoint, vacuum } from './maintenance.
 import { ensureSchema } from './schema.js';
 
 export class SqliteDriver extends DeepBaseDriver {
-  constructor({ name, path, pragma, busyTimeoutMs, busyRetry, ...opts } = {}) {
+  constructor({
+    name,
+    path,
+    pragma,
+    busyTimeoutMs,
+    busyRetry,
+    queryWindowMaxRecords,
+    queryWindowMaxProbes,
+    ...opts
+  } = {}) {
     super(opts);
 
     if (typeof path !== 'string' || path.trim() === '' || !pathModule.isAbsolute(path)) {
       throw new TypeError('SqliteDriver requires an absolute "path" option.');
     }
 
-    const config = resolveSqliteConfig({ pragma, busyTimeoutMs, busyRetry });
+    const config = resolveSqliteConfig({
+      pragma,
+      busyTimeoutMs,
+      busyRetry,
+      queryWindowMaxRecords,
+      queryWindowMaxProbes,
+    });
     this.name = name || 'default';
     this.path = path;
     this.pragma = config.pragma;
     this.pragmaConfig = config.pragmaConfig;
     this.busyTimeoutMs = config.busyTimeoutMs;
     this.busyRetry = config.busyRetry;
+    this.queryWindowMaxRecords = config.queryWindowMaxRecords;
+    this.queryWindowMaxProbes = config.queryWindowMaxProbes;
 
     this.path = pathModule.resolve(this.path);
     this.fileName = pathModule.join(this.path, `${this.name}.db`);
@@ -89,6 +106,9 @@ export class SqliteDriver extends DeepBaseDriver {
     this.getLastKeyStmt = this.db.prepare('SELECT key FROM deepbase ORDER BY seq DESC, key DESC LIMIT 1');
     this.delChildrenStmt = this.db.prepare('DELETE FROM deepbase WHERE key >= ? AND key < ?');
     this.hasChildrenStmt = this.db.prepare('SELECT 1 FROM deepbase WHERE key >= ? AND key < ? LIMIT 1');
+    this.hasRangeStmt = this.db.prepare('SELECT 1 FROM deepbase WHERE key >= ? AND key < ? LIMIT 1');
+    this.getChildKeysStmt = this.db.prepare('SELECT key FROM deepbase WHERE key >= ? AND key < ? ORDER BY key');
+    this.getAllKeysStmt = this.db.prepare('SELECT key FROM deepbase ORDER BY key');
 
     const setTxn = this.db.transaction((key, jsonValue, keys) => {
       this._expandParentObjects(keys);
@@ -208,6 +228,86 @@ export class SqliteDriver extends DeepBaseDriver {
     return this._getSync(args);
   }
 
+  async query(path, steps) {
+    await this.connect();
+    const window = resolveQueryWindow(steps);
+    if (window) {
+      const records = this._readQueryWindow(path, window);
+      if (records) return evaluateQuery(records, window.rest, { path });
+    }
+    return evaluateQuery(this._getSync(path), steps, { path });
+  }
+
+  /**
+   * Answer a leading skip()/take() window from the key index, so only the kept
+   * records are rebuilt. Returns null when the window cannot be proven
+   * equivalent to reading the collection in record order.
+   * @param {Array<string|number>} path - Path to the queried object
+   * @param {{offset: number, limit: number|null}} window - Resolved window
+   * @returns {object|null} Records keyed by id, or null for the generic path
+   */
+  _readQueryWindow(path, { offset, limit }) {
+    const needed = limit === null ? Infinity : offset + limit;
+    if (needed === 0 || needed > this.queryWindowMaxRecords) return null;
+
+    const ids = [];
+    const seen = new Set();
+    let probes = 0;
+    let previous;
+
+    const scan = path.length === 0
+      ? this.getAllKeysStmt.iterate()
+      : this.getChildKeysStmt.iterate(...this._childRange(this._pathToKey(path)));
+
+    for (const row of scan) {
+      const id = this._keyToPath(row.key)[path.length];
+      if (id === undefined || id === previous) continue;
+      // Record ids must sit in one run of rows, in ascending key order, for the
+      // key index order to match the record order evaluateQuery() establishes.
+      if (seen.has(id)) return null;
+      // One probe per id character, plus the children probe below, keeps the
+      // guard cheaper than reading the collection for any window we accept.
+      probes += id.length + 1;
+      if (probes > this.queryWindowMaxProbes) return null;
+      // The first id sizes the whole window: long ids cost a probe each, so a
+      // window that cannot fit the budget falls back before probing further.
+      if (ids.length === 0 && needed * probes > this.queryWindowMaxProbes) return null;
+      if (this._isWindowEdgeUnsafe(path, id)) return null;
+      seen.add(id);
+      previous = id;
+      ids.push(id);
+      if (ids.length >= needed) break;
+    }
+
+    // No rows means either a missing path or a value that is not an object;
+    // both keep the generic path so it can report the same error.
+    if (ids.length === 0) return null;
+
+    const selected = limit === null ? ids.slice(offset) : ids.slice(offset, offset + limit);
+    const records = {};
+    for (const id of selected) {
+      records[id] = this._getSync([...path, id]);
+    }
+    return records;
+  }
+
+  /**
+   * Stored keys escape "." and "\\", and records expand into "<key>.<field>"
+   * rows, so a key-order scan can disagree with the record order evaluateQuery()
+   * uses. Probe the two shapes that can produce that disagreement.
+   * @param {Array<string|number>} path - Path to the queried object
+   * @param {string} id - Record id to check
+   * @returns {boolean} True when a native window could skip an earlier record
+   */
+  _isWindowEdgeUnsafe(path, id) {
+    for (let index = 0; index < id.length; index++) {
+      const prefix = this._pathToKey([...path, id.slice(0, index)]);
+      if (this.hasRangeStmt.get(`${prefix}\\`, `${prefix}]`)) return true;
+      if (id[index] < '.' && this.hasChildrenStmt.get(...this._childRange(prefix))) return true;
+    }
+    return false;
+  }
+
   _getSync(args) {
     if (args.length === 0) {
       return this._getRootObject();
@@ -269,8 +369,31 @@ export class SqliteDriver extends DeepBaseDriver {
     const key = this._pathToKey(keys);
     const childRange = this._childRange(key);
     return this._runWrite(() => {
+      if (this._delArrayElement(keys)) return;
       this._delTxn(key, ...childRange, keys);
     });
+  }
+
+  /**
+   * A stored array lives in one row, so deleting one of its indexes has to
+   * splice the array and rewrite that row instead of deleting a child row that
+   * does not exist. Returns true when the array handled the delete.
+   * @param {Array<string|number>} keys - Path to the parent plus the index
+   * @returns {boolean} True when an array element was removed
+   */
+  _delArrayElement(keys) {
+    if (keys.length < 2) return false;
+
+    const parentPath = keys.slice(0, -1);
+    const parent = this._getSync(parentPath);
+    if (!Array.isArray(parent)) return false;
+
+    const index = keys[keys.length - 1];
+    // removeKey() splices real indexes and ignores everything else.
+    if (!removeKey(parent, index)) return false;
+
+    this._setTxn(this._pathToKey(parentPath), JSON.stringify(parent), keys);
+    return true;
   }
 
   async inc(...args) {

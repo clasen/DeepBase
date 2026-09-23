@@ -232,8 +232,37 @@ export function deleteAtPath(root, path) {
     }
     current = current[segment];
   }
-  if (current !== null && typeof current === 'object') delete current[path.at(-1)];
+  removeKey(current, path.at(-1));
   return result;
+}
+
+/**
+ * Remove one key from an object or an array.
+ * Array indices are spliced so the array shrinks, the way pop() and shift()
+ * expect; anything that is not an existing key is left untouched.
+ * @param {any} target - Object or array that holds the key
+ * @param {string|number} key - Key or array index to remove
+ * @returns {boolean} True when something was removed
+ */
+export function removeKey(target, key) {
+  if (target === null || typeof target !== 'object') return false;
+  if (!Object.prototype.hasOwnProperty.call(target, key)) return false;
+
+  if (Array.isArray(target)) {
+    const index = Number(key);
+    const isIndex = Number.isInteger(index) && index >= 0 && index < target.length
+      && String(index) === String(key);
+    if (isIndex) {
+      target.splice(index, 1);
+      return true;
+    }
+  }
+
+  // Arrays expose non-configurable own properties such as `length`.
+  if (!Object.getOwnPropertyDescriptor(target, key)?.configurable) return false;
+
+  delete target[key];
+  return true;
 }
 
 function issue(code, entity, path, message, details = {}) {

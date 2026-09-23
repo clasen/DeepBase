@@ -118,6 +118,22 @@ const allUsers = await db.get('users');
 // Scans all keys matching prefix
 ```
 
+### Querying
+
+`db.query(...path)` is evaluated in memory: the driver reads the whole
+document already stored in Redis and walks it locally. v1 does not push
+filters to the server and does not use indexes.
+
+Every result has the `{ id, value }` shape, where `id` is the property name
+inside the queried object:
+
+```javascript
+await db.set('users', 'alice', { name: 'Alice', age: 30 });
+
+const records = await db.query('users').where('age', '>=', 18).toArray();
+// [{ id: 'alice', value: { name: 'Alice', age: 30 } }]
+```
+
 ## Connection String Formats
 
 ```javascript

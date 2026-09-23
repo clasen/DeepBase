@@ -1,4 +1,4 @@
-import { DeepBaseDriver } from 'deepbase';
+import { DeepBaseDriver, evaluateQuery, removeKey } from 'deepbase';
 import { MongoClient } from 'mongodb';
 
 const ROOT_VALUE_FIELD = '__deepbase_value';
@@ -43,6 +43,7 @@ export class MongoDriver extends DeepBaseDriver {
       for (let item of list) {
         obj[item._id] = this._unescapeObject(item);
         delete obj[item._id]._id;
+        obj[item._id] = this._unwrapRootValue(obj[item._id]);
       }
       return obj;
     }
@@ -55,15 +56,38 @@ export class MongoDriver extends DeepBaseDriver {
     
     // Unescape the object keys before navigating
     const unescapedObj = this._unescapeObject(obj);
-    if (
-      arr.length === 0 &&
-      Object.keys(unescapedObj).length === 1 &&
-      Object.prototype.hasOwnProperty.call(unescapedObj, ROOT_VALUE_FIELD)
-    ) {
-      return unescapedObj[ROOT_VALUE_FIELD];
-    }
+    // Root values live under ROOT_VALUE_FIELD, so nested paths navigate the
+    // wrapped value instead of the wrapper document.
+    const root = this._unwrapRootValue(unescapedObj);
+    if (arr.length === 0) return root;
 
-    return this._getFromUnescaped(unescapedObj, arr);
+    return this._getFromUnescaped(root, arr);
+  }
+
+  /**
+   * Non-object root values are stored under ROOT_VALUE_FIELD; unwrap them so
+   * root reads match every other driver.
+   */
+  _unwrapRootValue(value) {
+    if (
+      Object.keys(value).length === 1 &&
+      Object.prototype.hasOwnProperty.call(value, ROOT_VALUE_FIELD)
+    ) {
+      return value[ROOT_VALUE_FIELD];
+    }
+    return value;
+  }
+
+  /**
+   * Run a query descriptor over the object stored at ...path.
+   * The document is read from MongoDB and evaluated in memory; filters are not
+   * pushed to the server and no indexes are used.
+   * @param {Array<string|number>} path - Path to the queried object
+   * @param {object[]} steps - Query descriptor steps
+   * @returns {Promise<Array<{id: string, value: any}>>} Matching records
+   */
+  async query(path, steps) {
+    return evaluateQuery(await this.get(...path), steps, { path });
   }
   
   async set(...arr) {
@@ -111,6 +135,25 @@ export class MongoDriver extends DeepBaseDriver {
       return this.collection.deleteOne({ _id });
     }
 
+    // Deleting an array index shifts the remaining elements, the way pop() and
+    // shift() expect. Read the parent, splice it and store the shorter array.
+    const lastKey = String(arr[arr.length - 1]);
+    if (/^\d+$/.test(lastKey)) {
+      const parentPath = arr.slice(0, -1);
+      const parent = await this.get(_id, ...parentPath);
+
+      if (Array.isArray(parent)) {
+        const spliced = parent.slice();
+        if (removeKey(spliced, lastKey)) {
+          const set = parentPath.length === 0
+            ? { [ROOT_VALUE_FIELD]: this._escapeValue(spliced) }
+            : { [this._pathToKey(parentPath)]: this._escapeValue(spliced) };
+
+          return this.collection.updateOne({ _id }, { $set: set });
+        }
+      }
+    }
+
     return this.collection.updateOne(
       { _id },
       { $unset: { [this._pathToKey(arr)]: "" } },
@@ -130,22 +173,59 @@ export class MongoDriver extends DeepBaseDriver {
   }
 
   async first(...args) {
-    const value = await this.get(...args);
-    if (value === null || typeof value !== 'object') {
-      return undefined;
-    }
-
-    for (const key in value) {
-      if (Object.prototype.hasOwnProperty.call(value, key)) {
-        return key;
-      }
-    }
-
-    return undefined;
+    const key = await this._boundaryKey(args, false);
+    return key === undefined ? this._boundaryKeyFromValue(args, false) : key;
   }
 
   async last(...args) {
-    const value = await this.get(...args);
+    const key = await this._boundaryKey(args, true);
+    return key === undefined ? this._boundaryKeyFromValue(args, true) : key;
+  }
+
+  /**
+   * Ask the server for the boundary field name only, instead of transferring
+   * the whole document. Returns undefined whenever the path is not a document,
+   * so the caller keeps the get()-based behavior.
+   * @param {Array<string|number>} path - Path to the queried object
+   * @param {boolean} fromEnd - Take the last key instead of the first
+   * @returns {Promise<string|undefined>} Boundary key
+   */
+  async _boundaryKey(path, fromEnd) {
+    if (path.length === 0) return undefined;
+
+    const target = path.slice(1);
+    const fieldPath = this._pathToKey(target);
+    const [row] = await this.collection.aggregate([
+      { $match: { _id: path[0] } },
+      {
+        $project: {
+          _id: 0,
+          fields: target.length === 0
+            ? {
+              $filter: {
+                input: { $objectToArray: '$$ROOT' },
+                as: 'field',
+                cond: { $not: [{ $in: ['$$field.k', ['_id', ROOT_VALUE_FIELD]] }] },
+              },
+            }
+            : {
+              $cond: [
+                { $eq: [{ $type: `$${fieldPath}` }, 'object'] },
+                { $objectToArray: `$${fieldPath}` },
+                [],
+              ],
+            },
+        },
+      },
+      { $project: { key: { $arrayElemAt: ['$fields.k', fromEnd ? -1 : 0] } } },
+    ]).toArray();
+
+    if (!row || typeof row.key !== 'string') return undefined;
+    return this._unescapeDots(row.key);
+  }
+
+  async _boundaryKeyFromValue(path, fromEnd) {
+    const value = await this.get(...path);
     if (value === null || typeof value !== 'object') {
       return undefined;
     }
@@ -153,6 +233,7 @@ export class MongoDriver extends DeepBaseDriver {
     let last;
     for (const key in value) {
       if (Object.prototype.hasOwnProperty.call(value, key)) {
+        if (!fromEnd) return key;
         last = key;
       }
     }
@@ -176,12 +257,13 @@ export class MongoDriver extends DeepBaseDriver {
   
   _getFromUnescaped(obj, keys) {
     if (keys.length === 0) return obj;
+    if (obj === null || typeof obj !== 'object') return null;
     if (keys.length === 1) {
       return obj[keys[0]] === undefined ? null : obj[keys[0]];
     }
     
     const key = keys.shift();
-    if (!obj.hasOwnProperty(key)) return null;
+    if (!Object.prototype.hasOwnProperty.call(obj, key)) return null;
     
     return this._getFromUnescaped(obj[key], keys);
   }
@@ -231,4 +313,3 @@ export class MongoDriver extends DeepBaseDriver {
 }
 
 export default MongoDriver;
-

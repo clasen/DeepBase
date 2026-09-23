@@ -242,6 +242,11 @@ export class EncryptionPlugin {
 
   async execute(context, next) {
     this._assertUsable();
+    if (context.operation === 'query') {
+      throw new DeepBaseEncryptionError('query() is not supported with encrypted values', {
+        code: 'ENCRYPTION_QUERY_UNSUPPORTED',
+      });
+    }
     if (context.kind === 'write') return next(this._writeOverride(context));
     const result = await next();
     return context.operation === 'get' ? this._decode(result, context.args) : result;

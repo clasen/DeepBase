@@ -1,5 +1,7 @@
 import assert from 'assert';
 import { DeepBase } from '../../core/src/index.js';
+import { arrayScenarios } from '../../core/test/array-scenario.js';
+import { queryScenarios, seedQueryFixture } from '../../core/test/query-scenario.js';
 import { MongoDriver } from '../src/MongoDriver.js';
 
 describe('MongoDriver', function() {
@@ -263,7 +265,7 @@ describe('MongoDriver', function() {
     });
   });
 
-  describe('Keys, Values, Entries', function() {
+    describe('Keys, Values, Entries', function() {
     beforeEach(async function() {
       await db.set('users', 'alice', { age: 30 });
       await db.set('users', 'bob', { age: 25 });
@@ -301,6 +303,59 @@ describe('MongoDriver', function() {
       const driver = db.getDriver(0);
       assert.strictEqual(await driver.first('missing'), undefined);
       assert.strictEqual(await driver.last('missing'), undefined);
+    });
+
+    it('first/last should match get() order for nested, dotted and non-object values', async function() {
+      const driver = db.getDriver(0);
+      const check = async (...path) => {
+        const value = await db.get(...path);
+        const keys = value !== null && typeof value === 'object' ? Object.keys(value) : [];
+        assert.strictEqual(await driver.first(...path), keys[0], `first(${path.join('.')})`);
+        assert.strictEqual(await driver.last(...path), keys[keys.length - 1], `last(${path.join('.')})`);
+      };
+
+      await db.set('dotted', 'a.b', 1);
+      await db.set('dotted', 'c.d', 2);
+      await db.set('dotted', 'z', 3);
+      await db.set('nested', 'deep', 'settings', { theme: 'dark', lang: 'en' });
+      await db.set('list', [1, 2, 3]);
+      await db.set('flag', true);
+      await db.set('empty', {});
+
+      await check();
+      for (const path of [['dotted'], ['nested', 'deep', 'settings'], ['list'], ['flag'], ['empty'], ['missing']]) {
+        await check(...path);
+      }
+    });
+
+    it('first/last should ask MongoDB for the boundary field', async function() {
+      const driver = db.getDriver(0);
+      let aggregations = 0;
+      const aggregate = driver.collection.aggregate.bind(driver.collection);
+      driver.collection.aggregate = (...args) => {
+        aggregations++;
+        return aggregate(...args);
+      };
+
+      const keys = Object.keys(await db.get('users'));
+      assert.strictEqual(await driver.first('users'), keys[0]);
+      assert.strictEqual(await driver.last('users'), keys[keys.length - 1]);
+      assert.strictEqual(aggregations, 2);
+    });
+
+    it('reads nested paths inside wrapped root values', async function() {
+      await db.set('myArray', [1, 2, 3, 4, 5]);
+      assert.strictEqual(await db.get('myArray', '4'), 5);
+      assert.strictEqual(await db.get('myArray', '0'), 1);
+      assert.strictEqual(await db.get('myArray', '9'), null);
+
+      await db.set('nullValue', null);
+      assert.strictEqual(await db.get('nullValue'), null);
+      assert.strictEqual(await db.get('nullValue', 'anything'), null);
+
+      await db.set('flag', true);
+      assert.strictEqual(await db.get('flag'), true);
+      assert.strictEqual(await db.get('flag', 'anything'), null);
     });
   });
 
@@ -375,5 +430,24 @@ describe('MongoDriver', function() {
       assert.strictEqual(config.timeout, 5000);
     });
   });
-});
 
+  describe('query()', function() {
+    beforeEach(async function() {
+      await seedQueryFixture(db);
+    });
+
+    for (const scenario of queryScenarios) {
+      it(scenario.title, async function() {
+        await scenario.run(db);
+      });
+    }
+  });
+
+  describe('Array Operations', function() {
+    for (const scenario of arrayScenarios) {
+      it(scenario.title, async function() {
+        await scenario.run(db);
+      });
+    }
+  });
+});

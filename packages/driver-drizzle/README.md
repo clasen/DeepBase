@@ -56,6 +56,10 @@ The monorepo tests use [`test/sqlite-fixture.js`](test/sqlite-fixture.js) (`crea
 - Upserts: new rows get `seq = MAX(seq)+1`; updates to an existing `key` only change `value` (`seq` unchanged).
 - Automatic schema setup creates an index on `seq` so sequence allocation and ordered reads do not scan the full table.
 
+### `query()`
+
+`db.query(...path)` reads the object at that path, rebuilds it from its rows, and evaluates `where` / `orderBy` / `skip` / `take` / `select` in memory. Version 1 pushes no filters into the SQL dialect and uses no index, so a query costs one full read of the queried object. Terminals (`toArray`, `first`, `count`, `any`) return records shaped `{ id, value }`, where `id` is the property name and `value` the stored value.
+
 ## Benchmarks
 
 Repo benchmarks build SQLite via the test fixture; your app wires whatever Drizzle dialect you use.

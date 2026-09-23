@@ -210,6 +210,35 @@ const values = await db.values('products'); // [{ price: 999 }, { price: 29 }]
 const entries = await db.entries('products'); // [['laptop', {...}], ['mouse', {...}]]
 ```
 
+### Querying Stored Objects
+
+`db.query(...path)` builds a chain over the direct properties of the object at a path. Nothing is read until you await a terminal method, and every record keeps the `{ id, value }` shape:
+
+```javascript
+await db.set('users', 'u1', { name: 'Alice', age: 31, address: { city: 'Rosario' } });
+await db.set('users', 'u2', { name: 'Bob', age: 18, address: { city: 'Córdoba' } });
+await db.set('users', 'u3', { name: 'Cara', age: 45, address: { city: 'Rosario' } });
+
+const adults = await db
+  .query('users')
+  .where('age', '>', 18)          // =, !=, >, >=, <, <=, in (several where() combine with AND)
+  .where('address.city', '=', 'Rosario')
+  .orderBy('age', 'desc')
+  .skip(0)
+  .take(20)
+  .select('name')                 // no callbacks
+  .toArray();
+// [{ id: 'u3', value: { name: 'Cara' } }, { id: 'u1', value: { name: 'Alice' } }]
+
+const first = await db.query('users').orderBy('age').first(); // { id: 'u2', value: {...} } or null
+const total = await db.query('users').where('age', '>', 18).count(); // 2
+const hasAny = await db.query('users').where('age', '>', 100).any(); // false
+```
+
+Steps run in chain order; without `orderBy()` records are ordered by key ascending, so pagination is stable. Comparisons are strict (no type coercion) and a missing field never matches, not even `null`. A missing path gives an empty collection; a path that does not hold an object rejects with an error naming the path. Arrays are out of scope for v1, and `query()` without a path queries the root object.
+
+Drivers read the stored value and filter it in memory, so v1 makes no promise about native filtering or field indexes. One convenience: `deepbase-sqlite` answers a chain that starts with `skip()`/`take()` (including `first()` and `any()`) from its key index and rebuilds only the records it keeps. See [`deepbase` package docs](packages/core/README.md#querying-with-query) for the per-driver cost. The encryption plugin rejects `query()`.
+
 ### Optional Data Schema
 
 DeepBase stays schemaless unless the application supplies a schema. Schemas describe entities over normal DeepBase paths, validate future mutations, and can declare references without changing the storage format:
@@ -356,11 +385,12 @@ new DeepBase(drivers, options)
 - `await db.dispose({ clearMemory, releaseInstance })` - Wait for pending writes, disconnect, clear memory, and release singleton instances
 - `await db.get(...path)` - Get value at path
 - `await db.set(...path, value)` - Set value at path
-- `await db.del(...path)` - Delete value at path
+- `await db.del(...path)` - Delete value at path (deleting an array index splices it, so the array shrinks)
 - `await db.inc(...path, amount)` - Increment numeric value
 - `await db.dec(...path, amount)` - Decrement numeric value
 - `await db.add(...path, value)` - Add item with auto-generated ID
 - `await db.upd(...path, fn)` - Update value with function
+- `db.query(...path)` - Start a chainable query over the object at path (`where`, `orderBy`, `skip`, `take`, `select` + `toArray`, `first`, `count`, `any`)
 - `await db.keys(...path)` - Get keys at path
 - `await db.values(...path)` - Get values at path
 - `await db.entries(...path)` - Get entries at path

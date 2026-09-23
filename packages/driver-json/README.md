@@ -244,6 +244,12 @@ new DeepBase(drivers, options)
 - `await db.last(...path)` - Get last key at path (same order as `keys()`)
 - `await db.values(...path)` - Get values at path
 - `await db.entries(...path)` - Get entries at path
+- `db.query(...path)` - Chain a query over the object at path (`where`, `orderBy`, `skip`, `take`, `select`) and run it with `toArray()`, `first()`, `count()` or `any()`
+
+`query()` reads the object at the path with `get()` and evaluates the chain in
+memory, so it walks the object already read: v1 pushes no filters to the driver
+and uses no indexes. Terminals resolve to `{ id, value }` records, where `id` is
+the property name and `value` the stored value.
 
 ### Migration Methods
 

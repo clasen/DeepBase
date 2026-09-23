@@ -117,6 +117,12 @@ All methods are async. Path arguments are variadic strings representing nested k
 | `pop` | `pop(...path)` | Remove and return the last item. |
 | `shift` | `shift(...path)` | Remove and return the first item. |
 
+`del()` on an index of a stored array removes the element and shifts the rest
+(`Array.prototype.splice` semantics), so `pop()` and `shift()` shrink arrays on
+every driver instead of leaving a `null` behind. Indexes the array does not have
+are ignored.
+| `query` | `query(...path)` | Start a chainable query over the object at path: `where`, `orderBy`, `skip`, `take`, `select` plus the terminals `toArray`, `first`, `count`, `any`. Returns `{ id, value }` records. |
+
 ### Connection
 
 | Method | Description |
@@ -190,6 +196,7 @@ Follow these rules when generating DeepBase code:
 12. **Never put SQLite on NFS or share one file across hosts.** WAL requires a local filesystem on a single host. For multi-host writers, use MongoDB/Redis/Postgres instead.
 13. **Stop old SQLite writers before upgrading.** Do not run old in-memory-seq binaries and new SQL-seq binaries against the same file at once.
 14. **Never install `better-sqlite3` alongside `deepbase-sqlite`.** SQLite maintenance lives on the driver: `backup()`, `checkIntegrity()`, `vacuum()`, `checkpoint()`. A second copy of the native module invites a version mismatch with the driver's.
+15. **Prefer `query()` over manual filtering.** Use `db.query(...path).where(...)` instead of `values()` plus `Array.filter()`. Remember it evaluates in memory on every supported driver (no native filtering or indexes in v1), it only covers objects (arrays are out of v1), and the encryption plugin rejects it.
 
 ## Examples
 
@@ -254,6 +261,26 @@ const userKeys = await db.keys('users');
 const userList = await db.values('users');
 const userEntries = await db.entries('users'); // [[id, data], ...]
 ```
+
+### Query collections
+
+```javascript
+const adults = await db
+  .query('users')                       // no path = root object; arrays are out of v1
+  .where('age', '>', 18)                // =, !=, >, >=, <, <=, in; several where() = AND
+  .where('address.city', '=', 'Rosario')
+  .orderBy('age', 'desc')               // 'asc' by default; missing/null sort last ascending
+  .skip(10)
+  .take(20)
+  .select('name', 'address.city')       // list of fields, no callbacks
+  .toArray();                           // [{ id: 'u1', value: { name: 'Ana', address: {...} } }]
+
+await db.query('users').where('age', '=', 18).first(); // record or null
+await db.query('users').count();
+await db.query('users').any();
+```
+
+Building the chain performs no I/O; terminal methods run it through the current read policy (`readFirst`, `readTimeout`, read hooks). Steps run in chain order and, without `orderBy()`, records are ordered by key ascending. Comparisons are strict, missing fields never match (not even `null`), a missing path returns an empty collection, and a path that does not hold an object rejects naming the path. Drivers read the stored object and evaluate in memory; filters are never pushed into the storage engine, so v1 promises no native filtering or field indexes. One exception is pagination: `deepbase-sqlite` answers a chain that *starts* with `skip()`/`take()` (including `first()`/`any()`) from the key index and rebuilds only the kept records, bounded by the driver's `queryWindowMaxRecords`/`queryWindowMaxProbes` budgets. The encryption plugin rejects `query()`.
 
 ### Pop/shift from collections
 

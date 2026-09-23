@@ -26,6 +26,11 @@ const PRAGMA_PROFILES = Object.freeze({
 export const SQLITE_CONFIG = Object.freeze({
   defaultPragma: 'balanced',
   busyTimeoutMs: 5000,
+  // query() answers a leading skip()/take() window from the key index. Both
+  // budgets keep that scan cheaper than reading the whole collection: how far
+  // the window may reach, and how many order probes it may spend.
+  queryWindowMaxRecords: 1000,
+  queryWindowMaxProbes: 12000,
   busyRetry: Object.freeze({
     maxAttempts: 2,
     baseDelayMs: 25,
@@ -40,7 +45,13 @@ function assertNonNegativeInteger(name, value) {
   }
 }
 
-export function resolveSqliteConfig({ pragma, busyTimeoutMs, busyRetry } = {}) {
+export function resolveSqliteConfig({
+  pragma,
+  busyTimeoutMs,
+  busyRetry,
+  queryWindowMaxRecords,
+  queryWindowMaxProbes,
+} = {}) {
   const resolvedPragma = pragma ?? SQLITE_CONFIG.defaultPragma;
   if (!Object.prototype.hasOwnProperty.call(SQLITE_CONFIG.pragmaProfiles, resolvedPragma)) {
     throw new TypeError(`pragma must be one of: ${Object.keys(SQLITE_CONFIG.pragmaProfiles).join(', ')}`);
@@ -68,10 +79,18 @@ export function resolveSqliteConfig({ pragma, busyTimeoutMs, busyRetry } = {}) {
     throw new TypeError('busyRetry.maxDelayMs must be greater than or equal to busyRetry.baseDelayMs');
   }
 
+  const resolvedQueryWindowMaxRecords = queryWindowMaxRecords ?? SQLITE_CONFIG.queryWindowMaxRecords;
+  assertNonNegativeInteger('queryWindowMaxRecords', resolvedQueryWindowMaxRecords);
+
+  const resolvedQueryWindowMaxProbes = queryWindowMaxProbes ?? SQLITE_CONFIG.queryWindowMaxProbes;
+  assertNonNegativeInteger('queryWindowMaxProbes', resolvedQueryWindowMaxProbes);
+
   return {
     pragma: resolvedPragma,
     pragmaConfig: SQLITE_CONFIG.pragmaProfiles[resolvedPragma],
     busyTimeoutMs: resolvedBusyTimeoutMs,
     busyRetry: resolvedBusyRetry,
+    queryWindowMaxRecords: resolvedQueryWindowMaxRecords,
+    queryWindowMaxProbes: resolvedQueryWindowMaxProbes,
   };
 }

@@ -233,6 +233,67 @@ Supported types are `string`, `number`, `boolean`, `null`, `object`, and `array`
 
 When no schema is declared, `describeSchema()` infers an editable candidate. Relationships suggested from `*Id` / `*_id` fields are marked `candidate: true` and never enforced. `validateSchema()` requires a declared schema. Enforcement is serialized within one `DeepBase` instance; concurrent writers in other processes require external coordination.
 
+## Querying with `query()`
+
+`db.query(...path)` builds a query over the direct properties of the object stored at a path. Building the chain performs no I/O: the driver runs it when you await a terminal method.
+
+```javascript
+const adults = await db
+  .query('users')
+  .where('age', '>', 18)
+  .orderBy('age')
+  .skip(10)
+  .take(20)
+  .select('name')
+  .toArray();
+// [{ id: 'aB3xK9mL2n', value: { name: 'Alice' } }, ...]
+```
+
+Every record keeps the `{ id, value }` shape: `id` is the property key, `value` is the stored value (projected when `select()` is used).
+
+### Chain methods
+
+| Method | Description |
+| --- | --- |
+| `where(field, operator, value)` | Keep records that match the comparison. Operators: `=`, `==`, `!=`, `<>`, `>`, `>=`, `<`, `<=` and `in`. Several `where()` calls combine with AND. |
+| `orderBy(field, direction)` | Order by a field. `direction` is `'asc'` (default) or `'desc'`. |
+| `skip(count)` | Drop the first `count` records. |
+| `take(count)` | Keep at most `count` records. |
+| `select(...fields)` | Project every record to the listed fields (an array of fields works too). No callbacks. |
+
+Terminal methods: `toArray()`, `first()` (returns `null` when nothing matches), `count()` and `any()`.
+
+### Rules
+
+- Steps run in chain order: `take(2).where(...)` filters the first two records, while `where(...).take(2)` filters first and then truncates.
+- Without `orderBy()`, records are ordered by key ascending, so pagination stays stable.
+- Nested fields use path segments: `where('address.city', '=', 'Rosario')` or `where(['address', 'city'], '=', 'Rosario')`.
+- Comparisons are strict, with no type coercion: `where('age', '=', '18')` does not match the number `18`.
+- A missing field never matches, not even against `null`. A field stored as `null` matches `where(field, '=', null)`.
+- With `orderBy()`, missing fields and `null` sort last in ascending order and first in descending order; ties keep the key order.
+- A missing path yields an empty collection. A path whose value is not an object rejects with an error naming the path.
+- Arrays and `query()` callbacks are out of scope for v1. `query()` without a path queries the root object.
+
+### Execution cost
+
+The driver reads the value from its own storage and `evaluateQuery()` filters it in memory. Filters are never pushed into the storage engine, so v1 makes no promise about native filtering or field indexes:
+
+| Driver | What `query()` reads before evaluating |
+| --- | --- |
+| `deepbase-json` | the object at the path from the JSON file (refreshed from disk first in `multiProcess` mode) |
+| `deepbase-sqlite` | the `key`/`value`/`seq` rows that build the object at the path; a chain that starts with `skip()`/`take()` is answered from the key index, so only the kept records are rebuilt |
+| `deepbase-drizzle` | the `key`/`value`/`seq` rows that build the object at the path |
+| `deepbase-mongodb` | the document stored under the first path segment, navigating the remaining segments |
+| `deepbase-redis` | the Redis key that holds the path root (`SCAN` + `GET` per key when querying the root) |
+| `deepbase-redis-json` | the RedisJSON document that holds the path root |
+| `deepbase-indexeddb` | the root object from IndexedDB, navigating the path in memory |
+
+Drivers that do not implement `query()` reject with `query() is not supported by <DriverName>`. The encryption plugin rejects `query()` with code `ENCRYPTION_QUERY_UNSUPPORTED`, because filtering happens after the driver reads stored values.
+
+### Native pagination windows
+
+`resolveQueryWindow()` turns a leading run of `skip()`/`take()` into an offset and a limit, and drivers that can address a sub-range of their storage use it. `deepbase-sqlite` reads the key index for that window and rebuilds only the records it keeps; `first()` and `any()` benefit because they are a single-record window. Steps before the window (`where`, `orderBy`, `select`) still force a full read, and the remaining steps run in memory. `deepbase-sqlite` bounds the optimization with `queryWindowMaxRecords` and `queryWindowMaxProbes` and falls back to the generic path when either budget is exceeded, so results never depend on storage order.
+
 ## API
 
 ### Constructor
@@ -275,12 +336,18 @@ new DeepBase(drivers, options)
 
 
 #### Query Operations
+- `db.query(...path)` - Start a chainable query over the object at path (see [Querying with `query()`](#querying-with-query))
 - `await db.keys(...path)` - Get keys at path
 - `await db.first(...path)` - Get the first key at path (same driver read order as `get()`)
 - `await db.last(...path)` - Get the last key at path (same driver read order as `get()`)
 - `await db.values(...path)` - Get values at path
 - `await db.entries(...path)` - Get entries at path
 - `await db.len(...path)` - Count the number of keys at path
+
+Deleting an index of a stored array removes the element and shifts the rest,
+like `Array.prototype.splice`, so `pop()` and `shift()` shrink arrays on every
+driver instead of leaving holes (rendered as `null`). Deleting an index the
+array does not have does nothing.
 
 #### Schema Operations
 - `await db.describeSchema()` - Describe the declared or inferred model as JSON

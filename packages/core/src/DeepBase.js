@@ -1,4 +1,5 @@
 import { DeepBaseDriver } from './DeepBaseDriver.js';
+import { DeepBaseQuery } from './query.js';
 import {
   DeepBaseSchemaError,
   cloneData,
@@ -622,6 +623,17 @@ export class DeepBase {
   async len(...args) {
     const k = await this.keys(...args);
     return k.length;
+  }
+
+  /**
+   * Start a chainable query over the direct properties of the object at ...path.
+   * The chain performs no I/O: drivers run it when a terminal method
+   * (toArray, first, count, any) is awaited.
+   * @param {...(string|number)} path - Path to the queried object (empty = root)
+   * @returns {DeepBaseQuery} Chainable query
+   */
+  query(...path) {
+    return new DeepBaseQuery(this, path);
   }
   
   /**

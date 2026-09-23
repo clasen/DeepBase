@@ -1,5 +1,7 @@
 import assert from 'assert';
 import { DeepBase } from '../../core/src/index.js';
+import { arrayScenarios } from '../../core/test/array-scenario.js';
+import { queryScenarios, seedQueryFixture } from '../../core/test/query-scenario.js';
 import { RedisDriver } from '../src/RedisDriver.js';
 
 describe('RedisDriver', function() {
@@ -19,10 +21,37 @@ describe('RedisDriver', function() {
 
     try {
       await probeDb.connect();
-      await probeDb.disconnect();
     } catch (error) {
       redisAvailable = false;
       redisSkipReason = error?.message || 'Unknown Redis connection error';
+    }
+
+    if (redisAvailable) {
+      // Plain Redis accepts the connection but rejects JSON.* commands.
+      const probeKey = '__availability_probe__:json_probe';
+      const client = probeDb.getDriver(0).client;
+      try {
+        await client.json.set(probeKey, '$', { probe: true });
+        await client.json.get(probeKey, { path: '$' });
+      } catch (error) {
+        redisAvailable = false;
+        redisSkipReason = `the server does not expose RedisJSON (${error?.message || 'JSON command failed'})`;
+      } finally {
+        try {
+          await client.del(probeKey);
+        } catch {
+          // The probe only reports whether the JSON commands work.
+        }
+      }
+    }
+
+    try {
+      await probeDb.disconnect();
+    } catch {
+      // Nothing to release when the probe never connected.
+    }
+
+    if (!redisAvailable) {
       console.warn(`[deepbase-redis-json:test] Redis/RedisJSON is unavailable, skipping tests: ${redisSkipReason}`);
     }
   });
@@ -360,6 +389,44 @@ describe('RedisDriver', function() {
       assert.strictEqual(await driver.first('missing'), undefined);
       assert.strictEqual(await driver.last('missing'), undefined);
     });
+
+    it('first/last should match get() order for nested, dotted and non-object values', async function() {
+      const driver = db.getDriver(0);
+      const check = async (...path) => {
+        const value = await db.get(...path);
+        const keys = value !== null && typeof value === 'object' ? Object.keys(value) : [];
+        assert.strictEqual(await driver.first(...path), keys[0], `first(${path.join('.')})`);
+        assert.strictEqual(await driver.last(...path), keys[keys.length - 1], `last(${path.join('.')})`);
+      };
+
+      await db.set('dotted', 'a.b', 1);
+      await db.set('dotted', 'c.d', 2);
+      await db.set('dotted', 'z', 3);
+      await db.set('nested', 'deep', 'settings', { theme: 'dark', lang: 'en' });
+      await db.set('list', [1, 2, 3]);
+      await db.set('flag', true);
+      await db.set('empty', {});
+
+      await check();
+      for (const path of [['dotted'], ['nested', 'deep', 'settings'], ['list'], ['flag'], ['empty'], ['missing']]) {
+        await check(...path);
+      }
+    });
+
+    it('first/last should read the key names with JSON.OBJKEYS', async function() {
+      const driver = db.getDriver(0);
+      const commands = [];
+      const sendCommand = driver.client.sendCommand.bind(driver.client);
+      driver.client.sendCommand = (command, ...rest) => {
+        commands.push(command[0]);
+        return sendCommand(command, ...rest);
+      };
+
+      const keys = Object.keys(await db.get('users'));
+      assert.strictEqual(await driver.first('users'), keys[0]);
+      assert.strictEqual(await driver.last('users'), keys[keys.length - 1]);
+      assert.deepStrictEqual(commands, ['JSON.OBJKEYS', 'JSON.OBJKEYS']);
+    });
   });
 
   describe('Complex Nested Operations', function() {
@@ -442,5 +509,24 @@ describe('RedisDriver', function() {
       assert.strictEqual(keys.length, operations);
     });
   });
-});
 
+  describe('query()', function() {
+    beforeEach(async function() {
+      await seedQueryFixture(db);
+    });
+
+    for (const scenario of queryScenarios) {
+      it(scenario.title, async function() {
+        await scenario.run(db);
+      });
+    }
+  });
+
+  describe('Array Operations', function() {
+    for (const scenario of arrayScenarios) {
+      it(scenario.title, async function() {
+        await scenario.run(db);
+      });
+    }
+  });
+});

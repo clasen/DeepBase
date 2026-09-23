@@ -109,6 +109,26 @@ const allUsers = await db.get('users');
 // Scans all keys matching prefix
 ```
 
+### Querying
+
+`db.query(...path)` is evaluated in memory: the driver reads the whole
+document already stored in RedisJSON and walks it locally. v1 does not push
+filters to the server and does not use indexes.
+
+Every result has the `{ id, value }` shape, where `id` is the property name
+inside the queried object:
+
+```javascript
+await db.set('users', 'alice', { name: 'Alice', age: 30 });
+
+const records = await db.query('users').where('age', '>=', 18).toArray();
+// [{ id: 'alice', value: { name: 'Alice', age: 30 } }]
+```
+
+### Boundary reads
+
+`db.first(...path)` and `db.last(...path)` read the field names with `JSON.OBJKEYS` instead of transferring the whole document, so only the names cross the wire. Values that are not JSON objects (arrays, scalars, missing paths) fall back to the previous `get()`-based lookup, and names are unescaped the same way `get()` does. Measured on a 20,000-record collection: 16.8 ms → 2.9 ms per call.
+
 ## Three-Tier Architecture
 
 Use Redis as a cache layer:

@@ -1,4 +1,4 @@
-import { DeepBaseDriver } from 'deepbase';
+import { DeepBaseDriver, evaluateQuery, removeKey } from 'deepbase';
 
 export class IndexedDBDriver extends DeepBaseDriver {
   static _instances = {};
@@ -81,6 +81,14 @@ export class IndexedDBDriver extends DeepBaseDriver {
       ? JSON.parse(JSON.stringify(value))
       : value;
   }
+
+  async query(path, steps) {
+    if (!this._connected) {
+      throw new Error('Database not connected. Call connect() first.');
+    }
+
+    return evaluateQuery(await this.get(...path), steps, { path });
+  }
   
   async set(...args) {
     return this._queueOperation(async () => {
@@ -126,8 +134,7 @@ export class IndexedDBDriver extends DeepBaseDriver {
       const key = keys.pop();
       const parentObj = this._getRecursive(rootObj, keys.slice());
       
-      if (parentObj && parentObj.hasOwnProperty(key)) {
-        delete parentObj[key];
+      if (removeKey(parentObj, key)) {
         await this._setRoot(rootObj);
       }
     });
@@ -367,4 +374,3 @@ export class IndexedDBDriver extends DeepBaseDriver {
 }
 
 export default IndexedDBDriver;
-

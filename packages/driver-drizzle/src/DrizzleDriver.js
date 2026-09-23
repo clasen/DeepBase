@@ -1,4 +1,4 @@
-import { DeepBaseDriver } from 'deepbase';
+import { DeepBaseDriver, evaluateQuery, removeKey } from 'deepbase';
 import { and, asc, desc, eq, gte, lt, sql } from 'drizzle-orm';
 import { integer as pgInteger, pgTable, text as pgText } from 'drizzle-orm/pg-core';
 import { int as mysqlInt, mysqlTable, text as mysqlText, varchar as mysqlVarchar } from 'drizzle-orm/mysql-core';
@@ -389,6 +389,11 @@ export class DrizzleDriver extends DeepBaseDriver {
     return this._getSync(args);
   }
 
+  async query(path, steps) {
+    this._ensureReady();
+    return evaluateQuery(this._getSync(path), steps, { path });
+  }
+
   _getSync(args) {
     return this._getSyncFrom(this.drizzle, args);
   }
@@ -446,8 +451,32 @@ export class DrizzleDriver extends DeepBaseDriver {
       return;
     }
 
+    if (this._delArrayElement(keys)) return;
+
     const key = this._pathToKey(keys);
     this._delTxn(key, this._childRange(key), keys);
+  }
+
+  /**
+   * A stored array lives in one row, so deleting one of its indexes has to
+   * splice the array and rewrite that row instead of deleting a child row that
+   * does not exist. Returns true when the array handled the delete.
+   * @param {Array<string|number>} keys - Path to the parent plus the index
+   * @returns {boolean} True when an array element was removed
+   */
+  _delArrayElement(keys) {
+    if (keys.length < 2) return false;
+
+    const parentPath = keys.slice(0, -1);
+    const parent = this._getSync(parentPath);
+    if (!Array.isArray(parent)) return false;
+
+    const index = keys[keys.length - 1];
+    // removeKey() splices real indexes and ignores everything else.
+    if (!removeKey(parent, index)) return false;
+
+    this._setTxn(this._pathToKey(parentPath), JSON.stringify(parent), keys);
+    return true;
   }
 
   async inc(...args) {

@@ -1,4 +1,4 @@
-import { DeepBaseDriver } from 'deepbase';
+import { DeepBaseDriver, evaluateQuery, removeKey } from 'deepbase';
 import steno from 'steno';
 import fs from 'fs';
 import * as pathModule from 'path';
@@ -107,6 +107,11 @@ export class JsonDriver extends DeepBaseDriver {
     const value = this._getRecursive(this.obj, args.slice());
     return this._decodeFromMemory(value, args);
   }
+
+  async query(path, steps) {
+    this._assertUsable();
+    return evaluateQuery(await this.get(...path), steps, { path });
+  }
   
   async set(...args) {
     return this._queueOperation(async () => {
@@ -137,8 +142,7 @@ export class JsonDriver extends DeepBaseDriver {
       const key = keys.pop();
       const parentObj = this._getRecursive(this.obj, keys.slice());
       
-      if (parentObj && parentObj.hasOwnProperty(key)) {
-        delete parentObj[key];
+      if (removeKey(parentObj, key)) {
         return this._saveToFile();
       }
     });
