@@ -145,7 +145,7 @@ without transformation.
 
 Built-in plugins, included in the `deepbase` package:
 
-- [`deepbase/plugins/encryption`](docs/plugins/encryption.md) encrypts all values automatically (Node.js).
+- [`deepbase/plugins/encryption`](docs/plugins/encryption.md) encrypts the whole document as one ciphertext (Node.js).
 - [`deepbase/plugins/links`](docs/plugins/links.md) resolves explicit path links (portable).
 
 Import each plugin from its own entry point and register it with `.use()`.
@@ -288,7 +288,7 @@ The driver reads the value from its own storage and `evaluateQuery()` filters it
 | `deepbase-redis-json` | the RedisJSON document that holds the path root |
 | `deepbase-indexeddb` | the root object from IndexedDB, navigating the path in memory |
 
-Drivers that do not implement `query()` reject with `query() is not supported by <DriverName>`. The encryption plugin rejects `query()` with code `ENCRYPTION_QUERY_UNSUPPORTED`, because filtering happens after the driver reads stored values.
+Drivers that do not implement `query()` reject with `query() is not supported by <DriverName>`. With the encryption plugin, `query()` reads the whole encrypted document and evaluates the steps over its decrypted copy.
 
 ### Native pagination windows
 
@@ -447,31 +447,17 @@ class MyDriver extends DeepBaseDriver {
 
 ## 🔒 Secure Storage with Encryption
 
-Use the built-in plugin to encrypt every value with AES-256-GCM before it
-reaches the driver. With `JsonDriver`, values stay encrypted both on disk and
-in its internal memory cache; no custom serialization or memory hooks are needed.
+Use the built-in plugin to keep the whole database in one AES-256-GCM
+ciphertext. Values, object keys, and array lengths never reach the driver in
+plaintext: with `JsonDriver`, the file and its internal memory cache hold a
+single envelope. No custom serialization or memory hooks are needed.
 
 ```javascript
 import DeepBase from 'deepbase';
-import { encryptedValues } from 'deepbase/plugins/encryption';
-import { JsonDriver } from 'deepbase-json';
+import { encryptedDocument } from 'deepbase/plugins/encryption';
 
-const encodedKey = process.env.DEEPBASE_ENCRYPTION_KEY;
-if (!encodedKey) {
-  throw new Error('DEEPBASE_ENCRYPTION_KEY is required');
-}
-
-const encryptionKey = Buffer.from(encodedKey, 'base64');
-const encryption = encryptedValues({
-  activeKeyId: 'primary',
-  keys: { primary: encryptionKey }
-});
-
-const driver = new JsonDriver({
-  path: '/var/lib/myapp/data',
-  name: 'secure_db'
-});
-const secureDB = new DeepBase(driver).use(encryption);
+const secureDB = new DeepBase({ path: '/var/lib/myapp/data', name: 'secure_db' })
+  .use(encryptedDocument({ password }));
 
 try {
   await secureDB.set('config', {
@@ -484,26 +470,23 @@ try {
   const config = await secureDB.get('config'); // Decrypted for the application
 } finally {
   await secureDB.dispose({ clearMemory: true, releaseInstance: true });
-  encryptionKey.fill(0);
 }
 ```
 
-Provide a base64-encoded, randomly generated 32-byte key through your
-application's secret manager or environment. The application reads it explicitly;
-the plugin requires a 32-byte `Buffer` or `Uint8Array` and never supplies a
-default key. Keep the key available under the same `keyId` to reopen the database.
+The password is stretched with scrypt (N=2^17, r=8, p=1 by default) once per
+open; writes only run AES-GCM with a fresh IV. The KDF parameters and salt live
+in an authenticated header, so raising `kdf: { N }` later re-encrypts the
+document on its next write. Raw 32-byte keys work too:
+`encryptedDocument({ activeKeyId, keys })`.
 
-Object keys, array lengths, and empty containers remain visible. Plaintext
-exists while your application supplies or reads values, including inside
-`upd()` callbacks; the plugin does not cache decrypted values. Disposal clears
-the JSON driver's cache and the plugin's internal key copies.
-
-Authentication failures, malformed envelopes, and unknown key IDs throw.
-Existing plaintext data is encrypted when rewritten through the plugin;
-registering it does not migrate existing data automatically.
+Any change to the stored envelope, including moving, truncating, or rolling
+back part of it, fails authentication. A wrong password fails the same way and
+never overwrites the stored document. Plaintext exists only while an operation
+runs and in the values your application reads; disposal zeroes the password and
+every key copy.
 
 See the [encryption plugin documentation](docs/plugins/encryption.md)
-for additional keys and key rotation.
+for key rotation, error codes, and limits.
 
 ## License
 

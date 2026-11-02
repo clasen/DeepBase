@@ -1,6 +1,6 @@
 export {
   DeepBaseEncryptionError,
   EncryptionPlugin,
-  encryptedValues,
+  encryptedDocument,
 } from './EncryptionPlugin.js';
-export { encryptedValues as default } from './EncryptionPlugin.js';
+export { encryptedDocument as default } from './EncryptionPlugin.js';

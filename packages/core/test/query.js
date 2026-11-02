@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { DeepBase, DeepBaseQuery, evaluateQuery, resolveQueryWindow } from '../src/index.js';
-import { DeepBaseEncryptionError, encryptedValues } from '../src/plugins/encryption/index.js';
+import { encryptedDocument } from '../src/plugins/encryption/index.js';
 import { GetOnlyDriver, MemoryDriver } from './memory-driver.js';
 import { seedQueryFixture, queryScenarios } from './query-scenario.js';
 
@@ -232,25 +232,21 @@ describe('db.query()', function() {
     );
   });
 
-  it('rejects query() with the encryption plugin', async function() {
+  it('evaluates query() over the document decrypted by the encryption plugin', async function() {
     const encryptedDb = createDb(new MemoryDriver(), { writeTimeout: 1000 });
-    encryptedDb.use(encryptedValues({
+    encryptedDb.use(encryptedDocument({
       activeKeyId: 'k1',
       keys: { k1: new Uint8Array(32).fill(7) },
     }));
     await encryptedDb.connect();
     await encryptedDb.set('users', 'u1', { name: 'Ana', age: 31 });
+    await encryptedDb.set('users', 'u2', { name: 'Bo', age: 17 });
 
-    await assert.rejects(
-      encryptedDb.query('users').toArray(),
-      error => error instanceof DeepBaseEncryptionError
-        && error.code === 'ENCRYPTION_QUERY_UNSUPPORTED',
+    assert.deepStrictEqual(
+      await encryptedDb.query('users').where('age', '>=', 18).toArray(),
+      [{ id: 'u1', value: { name: 'Ana', age: 31 } }],
     );
-    await assert.rejects(
-      encryptedDb.query('users').count(),
-      error => error instanceof DeepBaseEncryptionError
-        && error.code === 'ENCRYPTION_QUERY_UNSUPPORTED',
-    );
+    assert.strictEqual(await encryptedDb.query('users').count(), 2);
   });
 
 });

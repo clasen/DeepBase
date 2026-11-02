@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { DeepBase, DeepBaseDriver } from 'deepbase';
-import { encryptedValues } from 'deepbase/plugins/encryption';
+import { encryptedDocument } from 'deepbase/plugins/encryption';
 import {
   DeepBaseLinkError,
   linkedData,
@@ -148,7 +148,7 @@ describe('deepbase/plugins/links', function() {
 
   it('composes with encrypted link values through normal db.get()', async function() {
     const driver = new MemoryDriver();
-    const encryption = encryptedValues({
+    const encryption = encryptedDocument({
       activeKeyId: 'primary',
       keys: { primary: Buffer.alloc(32, 0x33) },
     });
@@ -158,8 +158,7 @@ describe('deepbase/plugins/links', function() {
     await db.set('nodes', 'root', { label: 'Root' });
     await db.set('aliases', 'home', links.to('nodes', 'root'));
 
-    assert.strictEqual(driver.data.aliases.home.$deepbase.plugin, 'encryption');
-    assert.strictEqual(driver.data.nodes.root.label.$deepbase.plugin, 'encryption');
+    assert.deepStrictEqual(Object.keys(driver.data), ['$deepbase']);
     assert.deepStrictEqual(await links.resolve('aliases', 'home'), { label: 'Root' });
   });
 

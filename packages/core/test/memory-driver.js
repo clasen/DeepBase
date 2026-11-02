@@ -49,6 +49,11 @@ export class MemoryDriver extends DeepBaseDriver {
     return args;
   }
 
+  async upd(...args) {
+    const update = args.pop();
+    return this.set(...args, update(this._read(args)));
+  }
+
   async query(path, steps) {
     this.queryCalls++;
     if (this.failQuery) throw new Error(`${this.name} driver query failure`);
