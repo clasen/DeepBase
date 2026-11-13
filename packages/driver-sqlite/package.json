@@ -1,6 +1,6 @@
 {
   "name": "deepbase-sqlite",
-  "version": "3.12.0",
+  "version": "4.0.0",
   "description": "⚡ DeepBase SQLite - SQLite database driver",
   "type": "module",
   "main": "src/index.cjs",
@@ -17,7 +17,7 @@
     "node": ">=22.16.0"
   },
   "peerDependencies": {
-    "deepbase": "^3.12.0"
+    "deepbase": "^4.0.0"
   },
   "scripts": {
     "test": "mocha test/test.js test/test-multiprocess.js"
