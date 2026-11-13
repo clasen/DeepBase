@@ -6,6 +6,7 @@ import MongoDriver from '../packages/driver-mongodb/src/index.js';
 import RedisDriver from '../packages/driver-redis/src/index.js';
 import RedisJsonDriver from '../packages/driver-redis-json/src/index.js';
 import fs from 'fs';
+import path from 'path';
 
 const ITERATIONS = 500;
 const QUEUE_STACK_ITERATIONS = 200;
@@ -120,7 +121,7 @@ async function runComparison() {
 
   // Test JSON Driver
   console.log('🔧 Testing JSON Driver...');
-  const testPath = './benchmarks/data';
+  const testPath = path.join(import.meta.dirname, 'data');
   results.json = await benchmarkDriver(
     'JSON',
     new JsonDriver({ name: 'compare', path: testPath }),
@@ -134,7 +135,7 @@ async function runComparison() {
 
   // Test SQLite Driver
   console.log('🗄️  Testing SQLite Driver...');
-  const sqlitePath = './benchmarks/data-sqlite';
+  const sqlitePath = path.join(import.meta.dirname, 'data-sqlite');
   results.sqlite = await benchmarkDriver(
     'SQLite',
     new SqliteDriver({ name: 'compare', path: sqlitePath }),
@@ -148,7 +149,7 @@ async function runComparison() {
 
   // Test Drizzle ORM (SQLite) Driver
   console.log('🧊 Testing Drizzle ORM (SQLite) Driver...');
-  const drizzlePath = './benchmarks/data-drizzle';
+  const drizzlePath = path.join(import.meta.dirname, 'data-drizzle');
   results.drizzle = await benchmarkDriver(
     'Drizzle',
     createSqliteDrizzleDriver({ name: 'compare', path: drizzlePath, pragma: 'balanced' }),

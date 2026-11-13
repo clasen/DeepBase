@@ -1,6 +1,7 @@
 import DeepBase from '../packages/core/src/index.js';
 import { createSqliteDrizzleDriver } from '../packages/driver-drizzle/test/sqlite-fixture.js';
 import fs from 'fs';
+import path from 'path';
 
 const ITERATIONS = 1000;
 const BATCH_SIZE = 100;
@@ -23,7 +24,7 @@ async function benchmark() {
   console.log('═══════════════════════════════════════════════════════════\n');
 
   // Clean up (separate folder from raw SQLite benchmark)
-  const testPath = './benchmarks/data-drizzle';
+  const testPath = path.join(import.meta.dirname, 'data-drizzle');
   if (fs.existsSync(testPath)) {
     fs.rmSync(testPath, { recursive: true, force: true });
   }

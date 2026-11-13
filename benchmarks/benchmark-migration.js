@@ -3,6 +3,7 @@ import JsonDriver from '../packages/driver-json/src/index.js';
 import MongoDriver from '../packages/driver-mongodb/src/index.js';
 import RedisDriver from '../packages/driver-redis/src/index.js';
 import fs from 'fs';
+import path from 'path';
 
 const DATA_SIZES = [100, 500, 1000];
 
@@ -91,7 +92,7 @@ async function runMigrationBenchmarks() {
   console.log('  DeepBase - Migration Performance Benchmark');
   console.log('═══════════════════════════════════════════════════════════\n');
 
-  const testPath = './benchmarks/data';
+  const testPath = path.join(import.meta.dirname, 'data');
   const scenarios = [
     {
       name: 'JSON → MongoDB',

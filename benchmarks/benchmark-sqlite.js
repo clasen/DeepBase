@@ -1,6 +1,7 @@
 import DeepBase from '../packages/core/src/index.js';
 import SqliteDriver from '../packages/driver-sqlite/src/index.js';
 import fs from 'fs';
+import path from 'path';
 
 const ITERATIONS = 1000;
 const BATCH_SIZE = 100;
@@ -23,7 +24,7 @@ async function benchmark() {
   console.log('═══════════════════════════════════════════════════════════\n');
 
   // Clean up
-  const testPath = './benchmarks/data';
+  const testPath = path.join(import.meta.dirname, 'data');
   if (fs.existsSync(testPath)) {
     fs.rmSync(testPath, { recursive: true, force: true });
   }

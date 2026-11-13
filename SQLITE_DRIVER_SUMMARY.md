@@ -115,7 +115,7 @@ benchmarks/
 
 1. **ACID Compliance**
    - Atomicity, Consistency, Isolation, Durability
-   - Transaction support with better-sqlite3
+   - Transaction support with the built-in `node:sqlite`
    - Data integrity guaranteed
 
 2. **High Performance**
@@ -163,7 +163,7 @@ config.theme           → "dark"
 
 #### Dependencies
 
-- `better-sqlite3` v11.8.1 - Fast, synchronous SQLite3 bindings
+- None for SQLite: uses the built-in `node:sqlite` (Node.js 22.16+ or Bun)
 - `nanoid` v5.1.5 - Unique ID generation
 
 ### 🎯 Use Cases

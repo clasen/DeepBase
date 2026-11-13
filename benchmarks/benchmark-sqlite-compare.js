@@ -33,7 +33,7 @@ function getDiskSize(dbPath, dbName) {
 
 function checkpointAndMeasure(driver, dbPath, dbName) {
   if (driver.db) {
-    try { driver.db.pragma('wal_checkpoint(TRUNCATE)'); } catch (_) { /* no-op for non-WAL */ }
+    try { driver.db.exec('PRAGMA wal_checkpoint(TRUNCATE)'); } catch (_) { /* no-op for non-WAL */ }
   }
   return getDiskSize(dbPath, dbName);
 }
@@ -272,7 +272,7 @@ async function run() {
   const paths = {};
   const results = {};
   for (const pragma of PRAGMA_MODES) {
-    paths[pragma] = `./benchmarks/data-${pragma}`;
+    paths[pragma] = path.join(import.meta.dirname, `data-${pragma}`);
     console.log(`Running SqliteDriver [pragma=${pragma}]...`);
     results[pragma] = await benchmarkDriver(
       pragma,
