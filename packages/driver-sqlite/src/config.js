@@ -31,6 +31,9 @@ export const SQLITE_CONFIG = Object.freeze({
   // the window may reach, and how many order probes it may spend.
   queryWindowMaxRecords: 1000,
   queryWindowMaxProbes: 12000,
+  // Writes queued while a commit runs share the next transaction, one SAVEPOINT
+  // each. The cap bounds how long one batch holds the write lock.
+  writeBatchMaxOps: 1000,
   busyRetry: Object.freeze({
     maxAttempts: 2,
     baseDelayMs: 25,

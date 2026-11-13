@@ -2,11 +2,10 @@ import { DeepBaseDriver, evaluateQuery, removeKey, resolveQueryWindow } from 'de
 import { DatabaseSync } from 'node:sqlite';
 import fs from 'fs';
 import * as pathModule from 'path';
-import { withBusyRetry } from './busy.js';
-import { resolveSqliteConfig } from './config.js';
+import { isSqliteBusyError, withBusyRetry } from './busy.js';
+import { SQLITE_CONFIG, resolveSqliteConfig } from './config.js';
 import { backupFrom, checkIntegrityAt, checkpoint, vacuum } from './maintenance.js';
 import { ensureSchema } from './schema.js';
-import { immediateTransaction } from './transaction.js';
 
 export class SqliteDriver extends DeepBaseDriver {
   constructor({
@@ -46,7 +45,8 @@ export class SqliteDriver extends DeepBaseDriver {
 
     this.db = null;
     this._connectPromise = null;
-    this._writeQueue = Promise.resolve();
+    this._pendingWrites = [];
+    this._drainingWrites = false;
   }
 
   _connectSync() {
@@ -97,37 +97,6 @@ export class SqliteDriver extends DeepBaseDriver {
     this.getChildKeysStmt = this.db.prepare('SELECT key FROM deepbase WHERE key >= ? AND key < ? ORDER BY key');
     this.getAllKeysStmt = this.db.prepare('SELECT key FROM deepbase ORDER BY key');
 
-    this._setTxn = immediateTransaction(this.db, (key, jsonValue, keys) => {
-      this._expandParentObjects(keys);
-      this._replaceRow(key, jsonValue);
-    });
-
-    this._delTxn = immediateTransaction(this.db, (key, childLowerBound, childUpperBound, keys) => {
-      this._expandParentObjects(keys);
-      this.delStmt.run(key);
-      this.delChildrenStmt.run(childLowerBound, childUpperBound);
-    });
-
-    this._updTxn = immediateTransaction(this.db, (keys, func) => {
-      const currentValue = this._getSync(keys);
-      const newValue = func(currentValue);
-      const key = this._pathToKey(keys);
-      this._expandParentObjects(keys);
-      this._replaceRow(key, JSON.stringify(newValue));
-      return keys;
-    });
-
-    this._setRootTxn = immediateTransaction(this.db, (entries) => {
-      this.db.exec('DELETE FROM deepbase');
-      for (const [key, value] of entries) {
-        this.setStmt.run(key, JSON.stringify(value));
-      }
-    });
-
-    this._clearTxn = immediateTransaction(this.db, () => {
-      this.db.exec('DELETE FROM deepbase');
-    });
-
     this._connected = true;
   }
 
@@ -140,11 +109,18 @@ export class SqliteDriver extends DeepBaseDriver {
   }
 
   async vacuum() {
-    return this._runWrite(() => vacuum(this.db));
+    return this._runMaintenance(() => vacuum(this.db));
   }
 
   async checkpoint(mode = 'PASSIVE') {
-    return this._runWrite(() => checkpoint(this.db, mode));
+    return this._runMaintenance(() => checkpoint(this.db, mode));
+  }
+
+  _runMaintenance(operation) {
+    return this._runExclusive(async () => {
+      await this.connect();
+      return withBusyRetry(operation, this.busyRetry);
+    });
   }
 
   async connect() {
@@ -168,7 +144,7 @@ export class SqliteDriver extends DeepBaseDriver {
   }
 
   async disconnect() {
-    return this._queueWrite(async () => {
+    return this._runExclusive(async () => {
       if (this._connectPromise) {
         await this._connectPromise;
       }
@@ -184,20 +160,121 @@ export class SqliteDriver extends DeepBaseDriver {
     this._connected = false;
   }
 
-  _queueWrite(operation) {
-    const result = this._writeQueue.then(operation, operation);
-    this._writeQueue = result.then(
-      () => undefined,
-      () => undefined,
-    );
-    return result;
+  /**
+   * Queue a synchronous write. Writes that pile up while a commit runs are
+   * committed together, so concurrent callers share one transaction.
+   * @param {Function} operation - Runs inside the write transaction
+   * @returns {Promise<unknown>} Resolves with operation's result after COMMIT
+   */
+  _runWrite(operation) {
+    return this._enqueueWrite(operation, true);
   }
 
-  _runWrite(operation) {
-    return this._queueWrite(async () => {
-      await this.connect();
-      return withBusyRetry(operation, this.busyRetry);
+  /**
+   * Queue an async operation that must run alone, outside any transaction,
+   * after every write queued before it.
+   * @param {Function} operation - Async operation
+   * @returns {Promise<unknown>} Operation's result
+   */
+  _runExclusive(operation) {
+    return this._enqueueWrite(operation, false);
+  }
+
+  _enqueueWrite(operation, batchable) {
+    return new Promise((resolve, reject) => {
+      this._pendingWrites.push({ operation, batchable, resolve, reject });
+      if (!this._drainingWrites) {
+        this._drainingWrites = true;
+        queueMicrotask(() => this._drainWrites());
+      }
     });
+  }
+
+  async _drainWrites() {
+    try {
+      while (this._pendingWrites.length > 0) {
+        if (!this._pendingWrites[0].batchable) {
+          const entry = this._pendingWrites.shift();
+          try {
+            entry.resolve(await entry.operation());
+          } catch (error) {
+            entry.reject(error);
+          }
+          continue;
+        }
+
+        // Awaiting the connection also yields, so writes issued in the same
+        // tick join this batch.
+        let connectError = null;
+        try {
+          await this.connect();
+        } catch (error) {
+          connectError = error;
+        }
+        const batch = this._takeWriteBatch();
+        if (connectError) {
+          for (const entry of batch) entry.reject(connectError);
+          continue;
+        }
+
+        let results;
+        try {
+          results = await withBusyRetry(() => this._commitWriteBatch(batch), this.busyRetry);
+        } catch (error) {
+          for (const entry of batch) entry.reject(error);
+          continue;
+        }
+        batch.forEach((entry, index) => {
+          const result = results[index];
+          if (result.ok) entry.resolve(result.value);
+          else entry.reject(result.error);
+        });
+      }
+    } finally {
+      this._drainingWrites = false;
+    }
+  }
+
+  _takeWriteBatch() {
+    const pending = this._pendingWrites;
+    let count = 0;
+    while (count < pending.length && count < SQLITE_CONFIG.writeBatchMaxOps && pending[count].batchable) {
+      count += 1;
+    }
+    return pending.splice(0, count);
+  }
+
+  _commitWriteBatch(batch) {
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const results = batch.length === 1
+        ? [{ ok: true, value: batch[0].operation() }]
+        : batch.map(entry => this._runInSavepoint(entry.operation));
+      this.db.exec('COMMIT');
+      return results;
+    } catch (error) {
+      if (this.db.isTransaction) this.db.exec('ROLLBACK');
+      throw error;
+    }
+  }
+
+  /**
+   * Run one batched write so its failure undoes only its own changes.
+   * Rethrows when the whole batch has to fail or retry: a busy error, or an
+   * error after which SQLite already rolled the transaction back.
+   */
+  _runInSavepoint(operation) {
+    this.db.exec('SAVEPOINT deepbase_write');
+    try {
+      const value = operation();
+      this.db.exec('RELEASE deepbase_write');
+      return { ok: true, value };
+    } catch (error) {
+      if (!this.db.isTransaction || isSqliteBusyError(error)) throw error;
+      this.db.exec('ROLLBACK TO deepbase_write');
+      this.db.exec('RELEASE deepbase_write');
+      return { ok: false, error };
+    }
   }
 
   async get(...args) {
@@ -321,7 +398,10 @@ export class SqliteDriver extends DeepBaseDriver {
     if (args.length === 1) {
       const entries = this._flattenObject(args[0]);
       return this._runWrite(() => {
-        this._setRootTxn(entries);
+        this.db.exec('DELETE FROM deepbase');
+        for (const [entryKey, entryValue] of entries) {
+          this.setStmt.run(entryKey, JSON.stringify(entryValue));
+        }
         return [];
       });
     }
@@ -331,9 +411,14 @@ export class SqliteDriver extends DeepBaseDriver {
     const key = this._pathToKey(keys);
     const jsonValue = JSON.stringify(value);
     return this._runWrite(() => {
-      this._setTxn(key, jsonValue, keys);
+      this._setRows(key, jsonValue, keys);
       return keys;
     });
+  }
+
+  _setRows(key, jsonValue, keys) {
+    this._expandParentObjects(keys);
+    this._replaceRow(key, jsonValue);
   }
 
   _replaceRow(key, jsonValue) {
@@ -344,7 +429,7 @@ export class SqliteDriver extends DeepBaseDriver {
   async del(...keys) {
     if (keys.length === 0) {
       return this._runWrite(() => {
-        this._clearTxn();
+        this.db.exec('DELETE FROM deepbase');
       });
     }
 
@@ -352,7 +437,9 @@ export class SqliteDriver extends DeepBaseDriver {
     const childRange = this._childRange(key);
     return this._runWrite(() => {
       if (this._delArrayElement(keys)) return;
-      this._delTxn(key, ...childRange, keys);
+      this._expandParentObjects(keys);
+      this.delStmt.run(key);
+      this.delChildrenStmt.run(...childRange);
     });
   }
 
@@ -374,7 +461,7 @@ export class SqliteDriver extends DeepBaseDriver {
     // removeKey() splices real indexes and ignores everything else.
     if (!removeKey(parent, index)) return false;
 
-    this._setTxn(this._pathToKey(parentPath), JSON.stringify(parent), keys);
+    this._setRows(this._pathToKey(parentPath), JSON.stringify(parent), keys);
     return true;
   }
 
@@ -398,7 +485,11 @@ export class SqliteDriver extends DeepBaseDriver {
   async upd(...args) {
     const func = args.pop();
     const keys = args;
-    return this._runWrite(() => this._updTxn(keys, func));
+    return this._runWrite(() => {
+      const newValue = func(this._getSync(keys));
+      this._setRows(this._pathToKey(keys), JSON.stringify(newValue), keys);
+      return keys;
+    });
   }
 
   async first(...args) {

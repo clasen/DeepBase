@@ -8,8 +8,25 @@ SQLite driver for DeepBase.
 npm install deepbase deepbase-sqlite
 ```
 
-Runs on the built-in `node:sqlite` module: Node.js 22.16+ or Bun. There is no
-native dependency to build.
+The driver uses the SQLite that ships with the runtime (`node:sqlite`), so there
+is no native addon to download or compile. It needs Node.js 22.16 or later, or
+Bun. The same code and test suite run on both.
+
+Node.js 22 prints `ExperimentalWarning: SQLite is an experimental feature` the
+first time the module loads. The warning comes from Node.js itself.
+
+## Upgrading from 3.12 and earlier
+
+Versions up to 3.12 were built on `better-sqlite3`. Existing database files
+open as they are; the table layout did not change.
+
+- Node.js 22.16 or later is required, or Bun.
+- A write that exhausts its busy retries rejects with `code: 'ERR_SQLITE_ERROR'`
+  and `errcode: 5` (`SQLITE_BUSY`). It used to reject with `code: 'SQLITE_BUSY'`.
+- The `DEEPBASE_SQLITE_BINDING_MISSING` error is gone, and so is the
+  `--ignore-scripts=false` install requirement.
+- Writes issued concurrently share transactions. See
+  [Write batching](#write-batching).
 
 ## Description
 
@@ -76,6 +93,20 @@ Uses the built-in `node:sqlite` for synchronous operations wrapped in async API:
 - Prepared statements for optimal performance
 - Transaction support for batch operations
 - Fast lookups with indexed keys
+
+### Write batching
+
+Writes issued while a commit is in flight share the next transaction, so
+concurrent callers pay for one commit instead of one each:
+
+```javascript
+await Promise.all(users.map(user => db.set('users', user.id, user)));
+```
+
+Each write still runs in its own `SAVEPOINT`: a write that throws rejects alone
+and the rest of the batch commits. Every promise resolves only after its batch
+commits. A batch holds at most 1000 writes; `vacuum()` and `checkpoint()` run
+alone, in queue order. Writes awaited one after another gain nothing.
 
 ### Multi-process concurrency
 
@@ -254,12 +285,67 @@ config.lang           | "en"     | 6
 
 ## Performance
 
-SQLite offers excellent performance:
+The numbers come from `benchmarks/benchmark-sqlite-compare.js`
+(`npm run bench:sqlite-compare`): 1,000 sequential writes and reads, 100
+updates and increments, 100 and 1,000 writes issued at once through
+`Promise.all`, and 500 concurrent increments. Each cell is the median of 15
+runs in separate processes, measured on 2026-11-13 on an Apple M4 Max with
+Node.js 22.23 and Bun 1.4.4. The Linux columns ran in Docker (`node:22`, arm64)
+on the same machine.
 
-- Fast reads and writes with prepared statements
-- Efficient indexing for quick lookups
-- Transaction batching for bulk operations
-- Low memory footprint
+### 3.12 against the current driver, `balanced` profile (ops/sec)
+
+The 3.12 columns are the previous `better-sqlite3` driver on Node.js. Bun
+cannot load that version.
+
+| Operation | macOS 3.12 | macOS Node.js | macOS Bun | Linux 3.12 | Linux Node.js | Linux Bun |
+|---|---:|---:|---:|---:|---:|---:|
+| Sequential write | 61.2k | 55.4k | 40.6k | 73.6k | 62.9k | 59.1k |
+| Sequential read | 308k | 279k | 280k | 323k | 304k | 337k |
+| Update | 66.5k | 59.5k | 44.1k | 68.7k | 65.4k | 79.0k |
+| Increment | 81.5k | 74.9k | 88.1k | 110k | 105k | 140k |
+| Batch write (100 at once) | 54.6k | 203k | 224k | 96.4k | 227k | 268k |
+| Concurrent write (1,000 at once) | 58.7k | 219k | 274k | 63.5k | 214k | 314k |
+| Concurrent increment (500 at once) | 88.7k | 199k | 257k | 66.2k | 194k | 310k |
+| Mixed, 75% reads | 227k | 255k | 227k | 236k | 303k | 398k |
+| Subtree read | 101k | 90.0k | 82.0k | 101k | 93.8k | 117k |
+| Module load | 5.4 ms | 1.7 ms | 1.0 ms | 5.6 ms | 1.4 ms | 1.0 ms |
+
+On Node.js, operations awaited one at a time run 5 to 15% slower than on 3.12.
+Writes issued together share a transaction (see [Write batching](#write-batching))
+and run 2 to 4 times faster.
+
+Bun on Linux bundles its own SQLite and was the fastest setup here for every
+operation except sequential writes. Bun on macOS links Apple's system SQLite,
+which turns on `checkpoint_fullfsync`: each WAL checkpoint waits for a full
+flush to disk, so sequential writes and updates run about 25% slower than on
+Node.js. Concurrent writes hide most of that cost, since a batch pays for one
+commit.
+
+Two scenarios of the benchmark are left out of these tables: deep-path writes
+and the session lifecycle. Both are short, and batching writes fewer WAL pages
+earlier in the run, so the automatic checkpoint now lands inside them. With a
+checkpoint forced before each one, they measure the same as on 3.12. On Linux,
+the `none` and `safe` profiles are bound by `fsync` inside the Docker VM, so
+they are not shown.
+
+### Profiles (Node.js on macOS, ops/sec)
+
+| Operation | none | safe | balanced | fast |
+|---|---:|---:|---:|---:|
+| Sequential write | 4.5k | 22.9k | 55.4k | 68.0k |
+| Sequential read | 110k | 277k | 279k | 256k |
+| Update | 4.7k | 21.0k | 59.5k | 62.1k |
+| Increment | 5.0k | 21.3k | 74.9k | 73.2k |
+| Batch write (100 at once) | 127k | 189k | 203k | 197k |
+| Concurrent write (1,000 at once) | 212k | 223k | 219k | 216k |
+| Concurrent increment (500 at once) | 171k | 211k | 199k | 200k |
+| Mixed, 75% reads | 122k | 270k | 255k | 268k |
+
+With batching, concurrent throughput barely depends on the profile, because one
+commit (and one `fsync` in `safe`) covers the whole batch. In `safe`, concurrent
+writes went from 25.5k ops/sec on 3.12 to 223k. All profiles kept 500
+concurrent increments exact.
 
 ## Migration
 
@@ -300,27 +386,6 @@ data/
 | Query Speed | 🚀 Indexed | 🔍 Full scan |
 | Reliability | 💪 Very High | ⚠️ File corruption risk |
 | Debugging | 🔧 SQL tools | 👁️ Easy to inspect |
-
-## Benchmark — pragma modes
-
-Median of 3 runs, 1 000 iterations per operation. `balanced` vs `none`:
-
-```
-Operation                  none    safe    balanced    fast   Bal vs None
-─────────────────────────────────────────────────────────────────────────
-Sequential Write          4,525  17,296     84,701  98,238      +1772%
-Sequential Read          20,705  22,871     23,405  23,040        +13%
-Update                    2,689  10,666     17,764  18,857       +561%
-Increment                 4,291  14,129     25,734  26,364       +500%
-Delete                    3,806  12,010     20,884  21,074       +449%
-Batch Write               3,813  17,763     87,209  83,045      +2187%
-Concurrent Write          4,449  22,196     72,613 102,458      +1532%
-Deep Write (5-lvl)        4,311  26,740     53,957  91,312      +1152%
-Obj Expansion             1,997     365     34,633  47,318      +1634%
-Session Lifecycle           572   2,465      3,700   3,792       +546%
-```
-
-Disk usage is **29 % smaller** after compaction compared to `none`. All correctness checks pass on every mode.
 
 ## Best Practices
 

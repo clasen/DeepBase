@@ -11,7 +11,7 @@ DeepBase is a powerful, flexible database abstraction that lets you use multiple
 - 📦 **Modular packages**: Install only what you need
 - 🚀 **Built-in migration**: Easy data migration between drivers
 - 🛡️ **Automatic fallback**: System continues working even if primary driver fails
-- 🌍 **Cross-platform**: Works on Node.js, Bun, Deno (with appropriate drivers)
+- 🌍 **Node.js and Bun**: The core, JSON and SQLite packages pass their test suites on both runtimes
 - 🔒 **Concurrency-safe**: Race condition protection for all concurrent operations
 - ⏱️ **Timeout support**: Configurable timeouts to prevent hanging operations
 
@@ -21,7 +21,7 @@ DeepBase v3.0 is split into modular packages:
 
 - **`deepbase`** - Core library with encryption and links plugins (includes `deepbase-json` as dependency)
 - **`deepbase-json`** - JSON filesystem driver (no external DB dependencies!)
-- **`deepbase-sqlite`** - SQLite driver (embedded database, ACID compliant)
+- **`deepbase-sqlite`** - SQLite driver on the runtime's built-in `node:sqlite` (Node.js 22.16+ or Bun, nothing to compile)
 - **`deepbase-mongodb`** - MongoDB driver
 - **`deepbase-redis`** - Redis driver (vanilla, works with any Redis)
 - **`deepbase-redis-json`** - Redis Stack driver (requires RedisJSON module)
@@ -404,7 +404,9 @@ DeepBase v3.0+ provides **built-in race condition protection** for all drivers:
 
 ### How it Works
 
-**SQLite Driver**: Uses native SQLite transactions for atomic operations
+**SQLite Driver**: Uses SQLite transactions for atomic operations. Writes issued
+concurrently share one transaction, each in its own savepoint, so a burst of
+writes pays for a single commit.
 ```javascript
 // 100 concurrent increments = exactly 100 (no race conditions)
 await Promise.all(
@@ -504,7 +506,8 @@ new SqliteDriver({
 })
 ```
 
-No external dependencies required - embedded database!
+Uses the SQLite built into the runtime (`node:sqlite`), so there is nothing to
+compile. Requires Node.js 22.16+ or Bun.
 
 ### MongoDB Driver (`@deepbase/mongodb`)
 
@@ -722,11 +725,26 @@ MIT License - Copyright (c) Martin Clasen
 
 ## 📊 Performance
 
-DeepBase v3.8.4 local benchmark medians (three runs on 2026-08-06,
-1,000 sequential writes and reads per run):
+SQLite driver, `balanced` profile, measured on 2026-11-13 on an Apple M4 Max
+(median of 15 runs, 1,000 operations):
+
+| Runtime | Sequential reads/sec | Sequential writes/sec | Concurrent writes/sec |
+|---|---:|---:|---:|
+| Node.js 22, macOS | ~279,000 | ~55,000 | ~219,000 |
+| Bun 1.4, macOS | ~280,000 | ~41,000 | ~274,000 |
+| Node.js 22, Linux (Docker) | ~304,000 | ~63,000 | ~214,000 |
+| Bun 1.4, Linux (Docker) | ~337,000 | ~59,000 | ~314,000 |
+
+Concurrent writes share transactions. On Node.js that makes them 3 to 4 times
+faster than in 3.12 on the same hardware. The
+[`deepbase-sqlite` README](packages/driver-sqlite/README.md#performance)
+compares each operation and profile against 3.12 and explains why Bun writes
+slower on macOS.
+
+Earlier results for the other drivers (DeepBase v3.8.4, three runs on
+2026-08-06, 1,000 sequential writes and reads per run):
 
 - 📁 **JSON**: ~597,000 cached reads/sec and ~1,500 persisted writes/sec
-- 🗃️ **SQLite** (`balanced`): ~236,000 reads/sec and ~49,100 writes/sec
 - 🏗️ **Drizzle + SQLite** (`balanced`): ~23,700 reads/sec and ~10,800 writes/sec
 
 MongoDB and Redis were not available in this measurement environment, so their

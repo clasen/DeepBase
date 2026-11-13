@@ -7,6 +7,7 @@ import { DeepBase } from '../../core/src/index.js';
 import { arrayScenarios } from '../../core/test/array-scenario.js';
 import { seedQueryFixture, queryScenarios } from '../../core/test/query-scenario.js';
 import { SqliteDriver } from '../src/SqliteDriver.js';
+import { SQLITE_CONFIG } from '../src/config.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const testDataPath = path.join(__dirname, 'test-data');
@@ -1043,6 +1044,81 @@ for (const pragma of PRAGMA_MODES) {
     });
   });
 }
+
+describe('SqliteDriver write batching', function () {
+  const batchPath = path.join(testDataPath, 'batching');
+  let driver;
+  let transactions;
+
+  beforeEach(async function () {
+    fs.rmSync(batchPath, { recursive: true, force: true });
+    driver = new SqliteDriver({ name: 'batching', path: batchPath });
+    await driver.connect();
+    transactions = 0;
+    const exec = driver.db.exec.bind(driver.db);
+    driver.db.exec = (sqlText) => {
+      if (sqlText === 'BEGIN IMMEDIATE') transactions += 1;
+      return exec(sqlText);
+    };
+  });
+
+  afterEach(async function () {
+    await driver.disconnect();
+    fs.rmSync(testDataPath, { recursive: true, force: true });
+  });
+
+  it('commits concurrent writes in a shared transaction', async function () {
+    const count = 200;
+    const results = await Promise.all(
+      Array.from({ length: count }, (_, i) => driver.set('items', `item${i}`, { i })),
+    );
+
+    assert.deepStrictEqual(results[7], ['items', 'item7']);
+    assert.ok(transactions < count / 10, `expected shared transactions, got ${transactions}`);
+    const items = await driver.get('items');
+    assert.strictEqual(Object.keys(items).length, count);
+    assert.deepStrictEqual(items.item199, { i: 199 });
+  });
+
+  it('caps each transaction at writeBatchMaxOps writes', async function () {
+    const count = SQLITE_CONFIG.writeBatchMaxOps * 2 + 1;
+    await Promise.all(Array.from({ length: count }, (_, i) => driver.set('items', `item${i}`, i)));
+
+    assert.ok(transactions >= 3, `expected at least 3 transactions, got ${transactions}`);
+    assert.strictEqual(Object.keys(await driver.get('items')).length, count);
+  });
+
+  it('rejects only the failing write of a batch', async function () {
+    await driver.set('kept', 'before');
+    transactions = 0;
+
+    const results = await Promise.allSettled([
+      driver.set('first', 1),
+      driver.upd('kept', () => { throw new Error('update failed'); }),
+      driver.inc('counter', 5),
+    ]);
+
+    assert.strictEqual(transactions, 1);
+    assert.deepStrictEqual(results.map(result => result.status), ['fulfilled', 'rejected', 'fulfilled']);
+    assert.strictEqual(results[1].reason.message, 'update failed');
+    assert.strictEqual(await driver.get('first'), 1);
+    assert.strictEqual(await driver.get('kept'), 'before');
+    assert.strictEqual(await driver.get('counter'), 5);
+  });
+
+  it('keeps queue order around maintenance, which runs outside a transaction', async function () {
+    const results = await Promise.all([
+      driver.set('value', 1),
+      driver.vacuum(),
+      driver.set('value', 2),
+      driver.checkpoint('PASSIVE'),
+      driver.inc('value', 1),
+    ]);
+
+    assert.strictEqual(results[3].busy, 0);
+    assert.strictEqual(await driver.get('value'), 3);
+  });
+});
 
 describe('SqliteDriver backup verification', function () {
   const corruptPath = path.join(testDataPath, 'corrupt');

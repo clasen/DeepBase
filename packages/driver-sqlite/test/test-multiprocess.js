@@ -231,6 +231,24 @@ describe('SqliteDriver multi-process safety', function () {
     await driver.disconnect();
   });
 
+  it('retries a whole batch of writes until a short external lock is released', async function () {
+    const name = 'short-lock-batch';
+    const fileName = path.join(testDataPath, `${name}.db`);
+    const driver = new SqliteDriver({ name, path: testDataPath, ...retryOptions });
+    await driver.connect();
+
+    const lockWorker = await spawnLockWorker({
+      fileName,
+      holdMs: 150,
+      busyTimeoutMs: retryOptions.busyTimeoutMs,
+    });
+    await Promise.all(Array.from({ length: 50 }, () => driver.inc('counter', 1)));
+    await lockWorker.done;
+
+    assert.strictEqual(await driver.get('counter'), 50);
+    await driver.disconnect();
+  });
+
   it('surfaces SQLITE_BUSY after the configured retry budget', async function () {
     const name = 'long-lock';
     const fileName = path.join(testDataPath, `${name}.db`);
