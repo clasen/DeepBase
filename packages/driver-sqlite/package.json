@@ -13,8 +13,8 @@
       "import": "./src/index.js"
     }
   },
-  "dependencies": {
-    "better-sqlite3": "^11.8.1"
+  "engines": {
+    "node": ">=22.16.0"
   },
   "peerDependencies": {
     "deepbase": "^3.12.0"

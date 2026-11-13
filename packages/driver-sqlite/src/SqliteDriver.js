@@ -1,11 +1,12 @@
 import { DeepBaseDriver, evaluateQuery, removeKey, resolveQueryWindow } from 'deepbase';
-import Database from 'better-sqlite3';
+import { DatabaseSync } from 'node:sqlite';
 import fs from 'fs';
 import * as pathModule from 'path';
 import { withBusyRetry } from './busy.js';
 import { resolveSqliteConfig } from './config.js';
 import { backupFrom, checkIntegrityAt, checkpoint, vacuum } from './maintenance.js';
 import { ensureSchema } from './schema.js';
+import { immediateTransaction } from './transaction.js';
 
 export class SqliteDriver extends DeepBaseDriver {
   constructor({
@@ -55,31 +56,17 @@ export class SqliteDriver extends DeepBaseDriver {
       fs.mkdirSync(this.path, { recursive: true });
     }
 
-    try {
-      this.db = new Database(this.fileName, { timeout: this.busyTimeoutMs });
-    } catch (err) {
-      if (this._isMissingNativeBinding(err)) {
-        const hint =
-          'deepbase-sqlite: the native binding for "better-sqlite3" is missing. ' +
-          'This usually means npm install scripts were disabled (e.g. `ignore-scripts=true` in your .npmrc). ' +
-          'Fix it with: `npm rebuild better-sqlite3 --ignore-scripts=false`, ' +
-          'or reinstall with `npm i --ignore-scripts=false`. ' +
-          'See https://github.com/clasen/DeepBase/tree/main/packages/driver-sqlite#troubleshooting';
-        const wrapped = new Error(hint);
-        wrapped.cause = err;
-        wrapped.code = 'DEEPBASE_SQLITE_BINDING_MISSING';
-        throw wrapped;
-      }
-      throw err;
-    }
+    this.db = new DatabaseSync(this.fileName, { timeout: this.busyTimeoutMs });
 
     const cfg = this.pragmaConfig;
     if (cfg) {
-      this.db.pragma(`journal_mode = ${cfg.journal_mode}`);
-      this.db.pragma(`synchronous = ${cfg.synchronous}`);
-      this.db.pragma(`temp_store = ${cfg.temp_store}`);
-      this.db.pragma(`cache_size = ${cfg.cache_size}`);
-      this.db.pragma(`mmap_size = ${cfg.mmap_size}`);
+      this.db.exec(`
+        PRAGMA journal_mode = ${cfg.journal_mode};
+        PRAGMA synchronous = ${cfg.synchronous};
+        PRAGMA temp_store = ${cfg.temp_store};
+        PRAGMA cache_size = ${cfg.cache_size};
+        PRAGMA mmap_size = ${cfg.mmap_size};
+      `);
     }
 
     const withoutRowid = cfg ? ' WITHOUT ROWID' : '';
@@ -110,20 +97,18 @@ export class SqliteDriver extends DeepBaseDriver {
     this.getChildKeysStmt = this.db.prepare('SELECT key FROM deepbase WHERE key >= ? AND key < ? ORDER BY key');
     this.getAllKeysStmt = this.db.prepare('SELECT key FROM deepbase ORDER BY key');
 
-    const setTxn = this.db.transaction((key, jsonValue, keys) => {
+    this._setTxn = immediateTransaction(this.db, (key, jsonValue, keys) => {
       this._expandParentObjects(keys);
       this._replaceRow(key, jsonValue);
     });
-    this._setTxn = (...args) => setTxn.immediate(...args);
 
-    const delTxn = this.db.transaction((key, childLowerBound, childUpperBound, keys) => {
+    this._delTxn = immediateTransaction(this.db, (key, childLowerBound, childUpperBound, keys) => {
       this._expandParentObjects(keys);
       this.delStmt.run(key);
       this.delChildrenStmt.run(childLowerBound, childUpperBound);
     });
-    this._delTxn = (...args) => delTxn.immediate(...args);
 
-    const updTxn = this.db.transaction((keys, func) => {
+    this._updTxn = immediateTransaction(this.db, (keys, func) => {
       const currentValue = this._getSync(keys);
       const newValue = func(currentValue);
       const key = this._pathToKey(keys);
@@ -131,20 +116,17 @@ export class SqliteDriver extends DeepBaseDriver {
       this._replaceRow(key, JSON.stringify(newValue));
       return keys;
     });
-    this._updTxn = (...args) => updTxn.immediate(...args);
 
-    const setRootTxn = this.db.transaction((entries) => {
+    this._setRootTxn = immediateTransaction(this.db, (entries) => {
       this.db.exec('DELETE FROM deepbase');
       for (const [key, value] of entries) {
         this.setStmt.run(key, JSON.stringify(value));
       }
     });
-    this._setRootTxn = (...args) => setRootTxn.immediate(...args);
 
-    const clearTxn = this.db.transaction(() => {
+    this._clearTxn = immediateTransaction(this.db, () => {
       this.db.exec('DELETE FROM deepbase');
     });
-    this._clearTxn = (...args) => clearTxn.immediate(...args);
 
     this._connected = true;
   }
@@ -487,16 +469,6 @@ export class SqliteDriver extends DeepBaseDriver {
     }
 
     return result;
-  }
-
-  _isMissingNativeBinding(err) {
-    if (!err) return false;
-    const msg = String(err.message || '');
-    return (
-      err.code === 'MODULE_NOT_FOUND' ||
-      msg.includes('Could not locate the bindings file') ||
-      msg.includes('better_sqlite3.node')
-    );
   }
 
   _childRange(key) {

@@ -5,13 +5,11 @@ SQLite driver for DeepBase.
 ## Installation
 
 ```bash
-npm install deepbase deepbase-sqlite --ignore-scripts=false
+npm install deepbase deepbase-sqlite
 ```
 
-> `deepbase-sqlite` depends on `better-sqlite3`, a native module. Its install
-> script downloads a prebuilt binary (or compiles from source as a fallback).
-> If your environment disables npm lifecycle scripts, see
-> [Troubleshooting](#troubleshooting) below.
+Runs on the built-in `node:sqlite` module: Node.js 22.16+ or Bun. There is no
+native dependency to build.
 
 ## Description
 
@@ -73,7 +71,7 @@ new SqliteDriver({
 
 ### High Performance
 
-Uses `better-sqlite3` for synchronous operations wrapped in async API:
+Uses the built-in `node:sqlite` for synchronous operations wrapped in async API:
 
 - Prepared statements for optimal performance
 - Transaction support for batch operations
@@ -95,10 +93,8 @@ When upgrading from a version that used the in-memory sequence counter, stop all
 
 ### Maintenance
 
-The driver owns the `better-sqlite3` connection and exposes maintenance through
-its own API, so a backup or vacuum job needs no `better-sqlite3` entry in your
-own `package.json`. That keeps a single native binding in the tree and removes
-any chance of a version mismatch between your copy and the driver's.
+The driver owns the SQLite connection and exposes maintenance through its own
+API, so a backup or vacuum job does not need to open a connection of its own.
 
 ```javascript
 const driver = db.getDriver(0);
@@ -111,16 +107,16 @@ await driver.checkpoint('TRUNCATE');
 
 | Method | Behaviour |
 |--------|-----------|
-| `checkIntegrity()` | Read-only `PRAGMA integrity_check`; returns its status verbatim. |
-| `backup(destination)` | Read-only source, online copy, verified before it resolves. Returns `destination`. |
+| `checkIntegrity()` | `PRAGMA integrity_check` on a temporary connection; returns its status verbatim. |
+| `backup(destination)` | Online copy from a temporary connection, verified before it resolves. Returns `destination`. |
 | `vacuum()` | Rebuilds the file to reclaim free pages. |
 | `checkpoint(mode)` | `PASSIVE` (default), `FULL`, `RESTART` or `TRUNCATE`. Returns `{ busy, log, checkpointed }`. |
 
-`checkIntegrity()` and `backup()` open a temporary read-only connection with
-`fileMustExist: true`, then close it. They never create, migrate, or change
+`checkIntegrity()` and `backup()` open a temporary connection in `mode=rw`,
+which refuses to create a missing file, then close it. They never create, migrate, or change
 PRAGMAs on the source database; a missing or mistyped source path fails instead
 of producing an empty database. `backup()` creates destination parent
-directories only after opening the source, then reopens the result read-only and
+directories only after opening the source, then reopens the result and
 verifies it with `integrity_check` — a backup nobody validated is not a backup.
 It rejects with code `DEEPBASE_SQLITE_BACKUP_CORRUPT` when the copy fails to
 verify, leaving the bad file on disk for inspection, so a restore routine must
@@ -359,60 +355,16 @@ await db.set(`user_${userId}_profile`, data);
 
 ## Troubleshooting
 
-### `SQLITE_BUSY` / `database is locked`
+### `database is locked` (`errcode` 5, `SQLITE_BUSY`)
 
 The driver waits and retries complete transactions when another connection owns the write lock. If the retry budget is exhausted:
 
 1. Confirm every process points to the same local filesystem, not NFS.
-2. Look for long-running migrations, raw `better-sqlite3` connections, SQLite tools, or overlapping deployments.
+2. Look for long-running migrations, raw SQLite connections, SQLite tools, or overlapping deployments.
 3. Increase `busyTimeoutMs` or `busyRetry.maxAttempts` only for known transient contention.
 4. Move to a client-server database if write contention is sustained.
 
-`better-sqlite3` is synchronous. Each native lock wait blocks that Node.js thread for up to `busyTimeoutMs`; the JavaScript backoff between attempts is asynchronous.
-
-### `Could not locate the bindings file` / `better_sqlite3.node` missing
-
-This error means `better-sqlite3`'s native binding was never fetched or built.
-It almost always comes from npm install scripts being disabled, which prevents
-`better-sqlite3`'s `install` script from downloading the prebuilt binary.
-
-Check whether scripts are disabled:
-
-```bash
-npm config get ignore-scripts   # should be "false"
-cat ~/.npmrc 2>/dev/null        # look for `ignore-scripts=true`
-cat .npmrc 2>/dev/null
-```
-
-Fix — rebuild the native binding in the project that uses `deepbase-sqlite`:
-
-```bash
-npm rebuild better-sqlite3 --ignore-scripts=false
-```
-
-If `npm rebuild` still doesn't fetch a prebuild (common when `ignore-scripts`
-is persisted in `.npmrc`), do a clean reinstall of just that package:
-
-```bash
-rm -rf node_modules/better-sqlite3
-npm i --ignore-scripts=false
-```
-
-Verify the binding landed:
-
-```bash
-ls node_modules/better-sqlite3/build/Release/better_sqlite3.node
-```
-
-Notes:
-
-- `npm i <pkg> --ignore-scripts=false` only runs scripts if the install
-  actually changes `node_modules`. When npm reports `up to date`, no install
-  scripts run — use `npm rebuild` or remove the package folder first.
-- In monorepos or CI, prefer setting `ignore-scripts=false` for the install
-  step rather than passing it as a one-off flag.
-- When this happens at runtime, `deepbase-sqlite` will throw an error with
-  code `DEEPBASE_SQLITE_BINDING_MISSING` and a pointer back to this section.
+`node:sqlite` is synchronous. Each native lock wait blocks that JavaScript thread for up to `busyTimeoutMs`; the backoff between attempts is asynchronous.
 
 ## License
 

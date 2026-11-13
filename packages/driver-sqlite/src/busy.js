@@ -1,5 +1,8 @@
+const SQLITE_BUSY = 5;
+
 export function isSqliteBusyError(error) {
-  return typeof error?.code === 'string' && error.code.startsWith('SQLITE_BUSY');
+  // Extended result codes (SQLITE_BUSY_SNAPSHOT, ...) keep the primary code in the low byte.
+  return Number.isInteger(error?.errcode) && (error.errcode & 0xff) === SQLITE_BUSY;
 }
 
 function retryDelayMs(attempt, { baseDelayMs, maxDelayMs }) {

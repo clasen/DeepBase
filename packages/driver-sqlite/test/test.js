@@ -1,5 +1,5 @@
 import assert from 'assert';
-import Database from 'better-sqlite3';
+import sqlite from 'node:sqlite';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -1060,9 +1060,9 @@ describe('SqliteDriver backup verification', function () {
     }
 
     const destination = path.join(corruptPath, 'backup.db');
-    const originalBackup = Database.prototype.backup;
-    Database.prototype.backup = async function (dest, ...args) {
-      const result = await originalBackup.call(this, dest, ...args);
+    const originalBackup = sqlite.backup;
+    sqlite.backup = async function (source, dest, ...args) {
+      const result = await originalBackup.call(this, source, dest, ...args);
       // Scribble over every page but the header, so the file still opens as a
       // database yet fails integrity_check.
       const handle = fs.openSync(dest, 'r+');
@@ -1078,7 +1078,7 @@ describe('SqliteDriver backup verification', function () {
         error => error.code === 'DEEPBASE_SQLITE_BACKUP_CORRUPT',
       );
     } finally {
-      Database.prototype.backup = originalBackup;
+      sqlite.backup = originalBackup;
     }
     assert.ok(fs.existsSync(destination), 'corrupt copy is left in place for inspection');
 

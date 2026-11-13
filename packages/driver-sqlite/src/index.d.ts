@@ -45,12 +45,12 @@ export class SqliteDriver extends DeepBaseDriver {
     queryWindowMaxRecords: number;
     queryWindowMaxProbes: number;
 
-    /** Opens the existing database read-only, runs `PRAGMA integrity_check`,
+    /** Opens a temporary connection to the existing database, runs `PRAGMA integrity_check`,
      *  then closes it. Does not connect or mutate the driver database. */
     checkIntegrity(): Promise<string>;
 
     /**
-     * Opens the existing source database read-only, writes an online backup to
+     * Opens a temporary connection to the existing source database, writes an online backup to
      * `destination`, then verifies the copy with `integrity_check`. Resolves
      * with `destination`, or rejects with code
      * `DEEPBASE_SQLITE_BACKUP_CORRUPT` when the copy does not verify.

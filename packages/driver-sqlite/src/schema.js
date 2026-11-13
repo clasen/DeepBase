@@ -1,5 +1,7 @@
+import { immediateTransaction } from './transaction.js';
+
 export function ensureSchema(db, { withoutRowid = '' } = {}) {
-  const setup = db.transaction(() => {
+  const setup = immediateTransaction(db, () => {
     db.exec(`
       CREATE TABLE IF NOT EXISTS deepbase (
         key TEXT PRIMARY KEY,
@@ -16,5 +18,5 @@ export function ensureSchema(db, { withoutRowid = '' } = {}) {
     db.exec('CREATE INDEX IF NOT EXISTS deepbase_seq_idx ON deepbase(seq)');
   });
 
-  setup.immediate();
+  setup();
 }

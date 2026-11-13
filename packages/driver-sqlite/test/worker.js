@@ -1,4 +1,4 @@
-import Database from 'better-sqlite3';
+import { DatabaseSync } from 'node:sqlite';
 import { SqliteDriver } from '../src/SqliteDriver.js';
 
 const options = JSON.parse(process.argv[2]);
@@ -11,7 +11,7 @@ async function holdLock() {
   const databaseOptions = options.busyTimeoutMs === undefined
     ? undefined
     : { timeout: options.busyTimeoutMs };
-  const db = new Database(options.fileName, databaseOptions);
+  const db = new DatabaseSync(options.fileName, databaseOptions);
   db.exec('BEGIN IMMEDIATE');
   process.send?.({ type: 'locked' });
   await wait(options.holdMs);

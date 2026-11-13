@@ -16,7 +16,7 @@ npm run bench:json        # JSON driver only
 npm run bench:mongodb     # MongoDB driver only
 npm run bench:redis       # Redis driver (vanilla) only
 npm run bench:redis-json  # Redis-JSON driver only
-npm run bench:sqlite      # SQLite (better-sqlite3) driver only
+npm run bench:sqlite      # SQLite (node:sqlite) driver only
 npm run bench:drizzle     # Drizzle ORM + SQLite driver only
 npm run bench:compare     # Compare all drivers (includes Drizzle)
 npm run bench:migration   # Migration performance

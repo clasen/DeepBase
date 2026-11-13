@@ -1,23 +1,28 @@
-import Database from 'better-sqlite3';
+import sqlite from 'node:sqlite';
 import fs from 'fs';
 import * as pathModule from 'path';
+import { pathToFileURL } from 'url';
 
 const CHECKPOINT_MODES = ['PASSIVE', 'FULL', 'RESTART', 'TRUNCATE'];
 
-function checkIntegrity(db) {
-  return db.pragma('integrity_check', { simple: true });
+function pragmaValue(db, pragma) {
+  const row = db.prepare(`PRAGMA ${pragma}`).get();
+  return row === undefined ? undefined : Object.values(row)[0];
 }
 
-function openReadonly(fileName, timeout) {
-  return new Database(fileName, {
-    readonly: true,
-    fileMustExist: true,
-    timeout,
-  });
+function checkIntegrity(db) {
+  return pragmaValue(db, 'integrity_check');
+}
+
+// mode=rw fails instead of creating a missing file. A readOnly connection would
+// fit better, but Apple's system SQLite (used by Bun on macOS) cannot open a
+// WAL database read-only once the last writer has removed its -shm file.
+function openExisting(fileName, timeout) {
+  return new sqlite.DatabaseSync(`${pathToFileURL(fileName).href}?mode=rw`, { timeout });
 }
 
 export function checkIntegrityAt(fileName, timeout) {
-  const db = openReadonly(fileName, timeout);
+  const db = openExisting(fileName, timeout);
   try {
     return checkIntegrity(db);
   } finally {
@@ -26,10 +31,10 @@ export function checkIntegrityAt(fileName, timeout) {
 }
 
 export async function backupFrom(fileName, destination, timeout) {
-  const source = openReadonly(fileName, timeout);
+  const source = openExisting(fileName, timeout);
   try {
     fs.mkdirSync(pathModule.dirname(pathModule.resolve(destination)), { recursive: true });
-    await source.backup(destination);
+    await sqlite.backup(source, destination);
   } finally {
     source.close();
   }
@@ -58,7 +63,7 @@ export function checkpoint(db, mode) {
     );
   }
 
-  if (db.pragma('journal_mode', { simple: true }) !== 'wal') {
+  if (pragmaValue(db, 'journal_mode') !== 'wal') {
     const error = new Error(
       "deepbase-sqlite: checkpoint requires journal_mode=WAL. Databases opened with pragma: 'none' " +
       'use a rollback journal and have no WAL to checkpoint.',
@@ -67,6 +72,5 @@ export function checkpoint(db, mode) {
     throw error;
   }
 
-  const [result] = db.pragma(`wal_checkpoint(${mode})`);
-  return result;
+  return { ...db.prepare(`PRAGMA wal_checkpoint(${mode})`).get() };
 }

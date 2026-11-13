@@ -88,7 +88,7 @@ describe('SqliteDriver multi-process safety', function () {
       busyTimeoutMs: 123,
     });
     await driver.connect();
-    assert.strictEqual(driver.db.pragma('busy_timeout', { simple: true }), 123);
+    assert.strictEqual(driver.db.prepare('PRAGMA busy_timeout').get().timeout, 123);
     await driver.disconnect();
   });
 
@@ -100,7 +100,7 @@ describe('SqliteDriver multi-process safety', function () {
     await driver.connect();
 
     const plan = driver.db
-      .prepare(`EXPLAIN QUERY PLAN ${driver.delChildrenStmt.source}`)
+      .prepare(`EXPLAIN QUERY PLAN ${driver.delChildrenStmt.sourceSQL}`)
       .all('parent.', 'parent/');
     const details = plan.map(step => step.detail).join('\n');
 
@@ -245,7 +245,7 @@ describe('SqliteDriver multi-process safety', function () {
     const lockWorker = await spawnLockWorker({ fileName, holdMs: 300, busyTimeoutMs: 10 });
     await assert.rejects(
       driver.set('blocked', true),
-      error => error.code === 'SQLITE_BUSY',
+      error => error.errcode === 5,
     );
     await lockWorker.done;
     await driver.disconnect();
